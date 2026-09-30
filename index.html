@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Age of Favelas</title>
+<style>
+  :root { --panel: rgba(18, 16, 22, 0.78); --ink: #f4efe6; --muted: #b9b1a4; --accent: #ffe14d; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a9d6ef; color: var(--ink);
+    font: 13px/1.45 system-ui, "Segoe UI", Roboto, sans-serif; }
+  canvas#game { display: block; touch-action: none; cursor: crosshair; }
+  .panel { position: fixed; background: var(--panel); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; padding: 10px 12px; backdrop-filter: blur(4px); }
+  #title { top: 12px; left: 12px; max-width: 300px; }
+  #title h1 { margin: 0 0 2px; font-size: 18px; letter-spacing: 0.5px; }
+  #title h1 span { color: var(--accent); }
+  #title .sub { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  #help ul { margin: 0; padding-left: 16px; }
+  #help li { margin: 1px 0; }
+  kbd { background: rgba(255,255,255,0.12); border-radius: 4px; padding: 0 5px; font: 11px ui-monospace, monospace; }
+  .hidden { display: none; }
+  #mini { top: 12px; right: 12px; padding: 8px; }
+  #mini canvas { display: block; }
+  #bottom { left: 12px; bottom: 12px; right: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  #status { flex: 1; min-width: 200px; }
+  #status b { color: var(--accent); }
+  button { background: rgba(255,255,255,0.1); color: var(--ink); border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 7px; padding: 5px 10px; font: inherit; cursor: pointer; }
+  button.on { background: var(--accent); color: #1b1b1b; border-color: var(--accent); }
+  .seed { color: var(--muted); font-size: 11px; }
+  @media (max-width: 640px) {
+    #title { max-width: calc(100% - 24px); }
+    #help { display: none; }
+    #mini { top: auto; bottom: 64px; }
+    #mini canvas { width: 150px; height: auto; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="title" class="panel">
+  <h1>Age of <span>Favelas</span></h1>
+  <div class="sub">Protótipo isométrico 2.5D · morro carioca procedural</div>
+  <div id="help">
+    <ul>
+      <li><kbd>WASD</kbd>/<kbd>setas</kbd> andar (8 direções) · <kbd>Shift</kbd> correr</li>
+      <li><b>Clique</b> num caminho para ir até lá (A*)</li>
+      <li>Gamepad: analógico / D-pad · <kbd>A</kbd> correr</li>
+      <li><kbd>X</kbd> raio-X · <kbd>G</kbd> grade de colisão</li>
+      <li><kbd>R</kbd> novo mapa · roda/<kbd>+</kbd><kbd>-</kbd> zoom · <kbd>H</kbd> ajuda</li>
+    </ul>
+  </div>
+</div>
+
+<div id="mini" class="panel"><canvas id="minimap" width="220" height="120"></canvas></div>
+
+<div id="bottom" class="panel">
+  <div id="status">carregando…</div>
+  <button id="btn-xray" class="on">Raio-X</button>
+  <button id="btn-grid">Colisão</button>
+  <button id="btn-new">Novo mapa</button>
+  <span class="seed">seed <span id="seed"></span></span>
+</div>
+
+<script src="src/util.js"></script>
+<script src="src/config.js"></script>
+<script src="src/world.js"></script>
+<script src="src/render.js"></script>
+<script src="src/entities.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>
