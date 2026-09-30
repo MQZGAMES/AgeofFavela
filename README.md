@@ -14,7 +14,7 @@ Protótipo 2.5D em perspectiva isométrica de um morro carioca gerado procedural
 | Andar em 8 direções | WASD / setas (W+D, S+A… seguem os eixos do grid, que é o sentido dos becos) |
 | Correr | Shift (gamepad: A / RT) |
 | Ir até um ponto | Clique ou toque num caminho (pathfinding A*) |
-| Subir escada externa | E no pé da escada (gamepad: A); W sobe, S desce |
+| Subir escadas das casas | É só andar: a escada e o terraço/laje são chão como outro qualquer |
 | Gamepad | Analógico ou D-pad |
 | Raio-X on/off | X |
 | Grade de colisão | G |
@@ -41,8 +41,12 @@ src/main.js      loop, input (teclado/mouse/toque/gamepad), câmera, raio-X, deb
 | Ônibus | 12 × 2,5 m | 4 × 0,85 tile (avenida) |
 | Casa | 6×6 a 9×9 m | blocos de 2×2 a 3×3 tiles |
 
-- Toda casa tem **porta voltada para um caminho alcançável**. Quando a casa não tem nenhum caminho por perto, a geração abre um beco até ela. A fundação é ajustada para ficar a no máximo 1 degrau da soleira.
-- Quando um andar de cima é de **outra família** (`unitFloor`), ele ganha uma **escada externa em ziguezague** na fachada, com porta própria no patamar. A escada é **percorrível**: no pé dela, `E` (ou andar contra a parede) sobe; W/↑ sobe e S/↓ desce; um clique no chão faz descer e seguir para o destino. A frente das portas e das escadas nunca recebe props que bloqueiam passagem.
+- Toda casa tem **porta voltada para um caminho alcançável**. Quando a casa não tem nenhum caminho por perto, a geração abre um beco até ela.
+- **Acessos verticais** (`planAccess`), sempre dentro do terreno da casa:
+  - **Puxadinho**: na fileira da frente, 1–2 tiles viram **escada** (patamar plano + degraus + corrimão) e o resto vira **terraço** na altura do andar de cima; a unidade de cima recua uma fileira e a porta dela abre para o terraço.
+  - **Laje acessível**: em casas de 1–2 andares, a escada leva ao teto e a laje inteira vira área de convivência.
+  - Escada e terraço são **superfícies caminháveis** (`surf`): a colisão compara alturas por ponto (`heightAt`), então o jogador sobe andando, e a escada e o terraço funcionam como parede e guarda-corpo. O A* passa pela aresta onde o corpo cabe (`crossing`), e o caminho vira waypoints.
+- **Portas no nível certo**: a fundação da casa fica exatamente na altura da borda do chão em frente à porta, e portas ou lojas secundárias só aparecem onde a soleira coincide com o chão. A frente de toda porta e escada nunca recebe props.
 
 ### Mapa
 - **Altura por tile** em unidades de degrau (14 px). O terreno sobe para o fundo (−y) e um pouco para a esquerda (−x).

@@ -203,12 +203,12 @@
   // ------------------------------------------------------------ casas
   function drawHouse(ctx, W, t, time) {
     const h = t.house, x = t.x, y = t.y, base = h.base;
-    const floors = AF.view.cutaway ? 1 : h.floors;
+    const floors = AF.view.cutaway ? Math.min(1, t.floorsHere) : t.floorsHere;
     for (let k = 0; k < floors; k++) {
       const st = h.styles[k], z1 = base + (k + 1) * FL;
       for (const side of ['L', 'R']) {
         const d = t.faces[side];
-        if (!d) continue;
+        if (!d || k < d.from) continue;              // pavimento escondido atrás do vizinho da mesma casa
         faceXf(ctx, side, x, y, z1);
         ctx.fillStyle = st.brick ? brickPat : st.color;
         ctx.fillRect(0, 0, FW, FH);
@@ -222,66 +222,82 @@
         }
         ctx.fillStyle = 'rgba(168,162,152,0.95)';       // laje / viga
         ctx.fillRect(0, 0, FW, 3);
-        if (k === 0) groundFloor(ctx, d, st, time);
+        if (k === d.upper) upperDoor(ctx, d);
+        else if (k === 0) groundFloor(ctx, d, st, time);
         else windowDeco(ctx, d.win[k], st, d, k);
-        if (d.stair) extStair(ctx, d, k);
         ctx.fillStyle = side === 'L' ? 'rgba(30,20,60,0.05)' : 'rgba(30,20,60,0.3)';
         ctx.fillRect(0, 0, FW, FH);
         ctx.restore();
       }
     }
-    if (AF.view.cutaway && h.floors > 1) drawCut(ctx, W, t, base + FL);
-    else drawRoof(ctx, W, t, time);
+    if (t.ramp) drawRamp(ctx, W, t);
+    else if (AF.view.cutaway && t.floorsHere > 1) drawCut(ctx, W, t, base + FL);
+    else if (t.floorsHere > 0) drawRoof(ctx, W, t, time);
+  }
+
+  // Porta da unidade de cima, abrindo para o terraço
+  function upperDoor(ctx, d) {
+    ctx.fillStyle = d.doorC; ctx.fillRect(15, 22, 17, 34);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    for (let v = 25; v < 55; v += 4) ctx.fillRect(15, v, 17, 1);
+    ctx.fillStyle = '#ddd'; ctx.fillRect(28, 38, 2, 2);
+    ctx.fillStyle = '#9d978d'; ctx.fillRect(13, 54, 21, 2);
+    ctx.fillStyle = '#fff3b0'; ctx.fillRect(22, 16, 4, 3);          // arandela
+    ctx.fillStyle = 'rgba(255,243,176,0.25)';
+    ctx.beginPath(); ctx.arc(24, 18, 7, 0, TAU); ctx.fill();
+  }
+
+  // Escada de concreto dentro do terreno da casa: patamar plano + degraus empilhados + corrimão.
+  // f = posição ao longo da subida (0..1), g = posição na largura (1 = lado da rua).
+  function drawRamp(ctx, W, t) {
+    const s = t.surf, x = t.x, y = t.y, lo = s.lo, hi = s.hi;
+    const X = s.axis === 'x', FLAT = AF.RAMP_FLAT;
+    const map = (f, g) => { const ff = s.dir > 0 ? f : 1 - f; return X ? [x + ff, y + g] : [x + g, y + ff]; };
+    const fbox = (f0, f1, g0, g1, z0, z1, col) => {
+      const a = map(f0, g0), b = map(f1, g1);
+      box(ctx, Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), z0, z1, col, 1.12);
+    };
+    const quad = (f0, f1, g0, g1, z, col) => {
+      const a = map(f0, g0), b = map(f1, g0), c = map(f1, g1), d = map(f0, g1);
+      poly(ctx, [P(a[0], a[1], z), P(b[0], b[1], z), P(c[0], c[1], z), P(d[0], d[1], z)], col);
+    };
+    // patamar (no térreo, piso de cimento; no alto, sobre a laje do cômodo de baixo)
+    quad(0, 1, 0, 1, lo, '#b7b0a3');
+    quad(0.03, FLAT - 0.02, 0.05, 0.95, lo + 0.02, '#c9c2b5');
+    // degraus: camadas empilhadas, cada uma apoiada na anterior (ordem de pintura correta)
+    const n = 6, run = (1 - FLAT) / n, rise = (hi - lo) / n;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < n; i++) {
+      fbox(FLAT + i * run, 1, 0, 0.96, lo + i * rise, lo + (i + 1) * rise, '#b3ab9e');
+      const e0 = map(FLAT + i * run, 0), e1 = map(FLAT + i * run, 0.96);
+      const p0 = P(e0[0], e0[1], lo + (i + 1) * rise), p1 = P(e1[0], e1[1], lo + (i + 1) * rise);
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.stroke();
+    }
+    // corrimão no lado aberto (rua), acompanhando a inclinação
+    const RH = 1.3, g = 0.97;
+    const rail = [[0.02, lo], [FLAT, lo], [1, hi]].map(([f, z]) => { const m = map(f, g); return P(m[0], m[1], z + RH); });
+    ctx.strokeStyle = '#2f3437'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(rail[0][0], rail[0][1]); ctx.lineTo(rail[1][0], rail[1][1]); ctx.lineTo(rail[2][0], rail[2][1]); ctx.stroke();
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    for (const f of [0.02, FLAT, FLAT + (1 - FLAT) / 2, 0.98]) {
+      const m = map(f, g), z = W.heightAt(t, m[0], m[1]), a = P(m[0], m[1], z), b = P(m[0], m[1], z + RH);
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+    }
+    ctx.stroke();
   }
 
   // Modo térreo: topo em corte, mostrando a espessura das paredes externas
   function drawCut(ctx, W, t, zt) {
     const x = t.x, y = t.y, h = t.house;
     poly(ctx, [P(x, y, zt), P(x + 1, y, zt), P(x + 1, y + 1, zt), P(x, y + 1, zt)], '#6e6a64');
-    const ext = (dx, dy) => { const n = W.at(x + dx, y + dy); return !n || n.house !== h; };
+    const ext = (dx, dy) => { const n = W.at(x + dx, y + dy); return !n || n.house !== h || n.floorsHere < 1; };
     const w = 0.09, c = '#d9d3c7';
     if (ext(0, -1)) poly(ctx, [P(x, y, zt), P(x + 1, y, zt), P(x + 1, y + w, zt), P(x, y + w, zt)], c);
     if (ext(-1, 0)) poly(ctx, [P(x, y, zt), P(x + w, y, zt), P(x + w, y + 1, zt), P(x, y + 1, zt)], c);
     if (ext(0, 1)) poly(ctx, [P(x, y + 1 - w, zt), P(x + 1, y + 1 - w, zt), P(x + 1, y + 1, zt), P(x, y + 1, zt)], c);
     if (ext(1, 0)) poly(ctx, [P(x + 1 - w, y, zt), P(x + 1, y, zt), P(x + 1, y + 1, zt), P(x + 1 - w, y + 1, zt)], c);
-  }
-
-  // Escada externa do puxadinho: um lance por pavimento (em ziguezague) até a porta da outra unidade
-  function extStair(ctx, d, k) {
-    const s = d.stair;
-    if (k > s.floor) return;
-    const flip = (s.dir * (k % 2 ? -1 : 1)) < 0;
-    const doorFlip = (s.dir * ((s.floor - 1) % 2 ? -1 : 1)) < 0;
-    ctx.save();
-    if (k === s.floor) {
-      // porta da unidade de cima, no lado do patamar
-      if (doorFlip) { ctx.translate(FW, 0); ctx.scale(-1, 1); }
-      ctx.fillStyle = '#6b4a2e'; ctx.fillRect(34, 24, 12, 32);
-      ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(35, 26, 10, 12);
-      ctx.fillStyle = '#e8d9a8'; ctx.fillRect(43, 40, 1.5, 1.5);
-      ctx.restore();
-      return;
-    }
-    if (flip) { ctx.translate(FW, 0); ctx.scale(-1, 1); }
-    const n = 8, run = 32 / n, rise = FH / n;
-    // corpo da escada (degraus + parte de baixo)
-    ctx.beginPath();
-    ctx.moveTo(0, FH);
-    for (let i = 0; i < n; i++) { ctx.lineTo(i * run, FH - (i + 1) * rise); ctx.lineTo((i + 1) * run, FH - (i + 1) * rise); }
-    ctx.lineTo(48, 0); ctx.lineTo(48, 5); ctx.lineTo(32, 5); ctx.lineTo(7, FH);
-    ctx.closePath();
-    ctx.fillStyle = '#b9b3a8'; ctx.fill();
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    ctx.beginPath(); ctx.moveTo(32, 5); ctx.lineTo(7, FH); ctx.lineTo(13, FH); ctx.lineTo(34, 9); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#e4dfd4';
-    for (let i = 0; i < n; i++) ctx.fillRect(i * run, FH - (i + 1) * rise, run, 1.2);
-    // corrimão
-    ctx.strokeStyle = '#3d3d3d'; ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(1, FH - 11); ctx.lineTo(32, -11); ctx.lineTo(48, -11);
-    for (const u of [2, 16, 31, 47]) { const v = u <= 32 ? FH - (u / 32) * FH : 0; ctx.moveTo(u, v - 11); ctx.lineTo(u, v); }
-    ctx.stroke();
-    ctx.restore();
   }
 
   function windowDeco(ctx, w, st, d, k) {
@@ -397,17 +413,34 @@
   }
 
   function drawRoof(ctx, W, t, time) {
-    const h = t.house, x = t.x, y = t.y, zt = h.base + h.floors * FL;
+    const h = t.house, x = t.x, y = t.y, zt = h.base + t.floorsHere * FL;
+    const deck = !!t.surf;                               // terraço / laje caminhável
+    const roof = deck ? 'laje' : h.roof;
     const top = [P(x, y, zt), P(x + 1, y, zt), P(x + 1, y + 1, zt), P(x, y + 1, zt)];
-    const ext = (dx, dy) => { const n = W.at(x + dx, y + dy); return !n || n.house !== h; };
-    if (h.roof === 'telha') {
+    // borda aberta (leva mureta): vizinho de fora, cômodo mais baixo da mesma casa,
+    // ou escada que não chega nesta borda; parede mais alta ou laje no mesmo nível ficam sem mureta
+    const ext = (dx, dy) => {
+      const n = W.at(x + dx, y + dy);
+      // terraço que dá direto num caminho no mesmo nível (beco de cima, outra laje): passagem aberta
+      if (deck && n && n.house !== h && W.isWalk(n) && Math.abs(W.edgeHeight(n, -dx, -dy) - zt) <= CFG.STEP) return false;
+      if (!n || n.house !== h) return true;
+      if (n.ramp) return Math.abs(W.edgeHeight(n, -dx, -dy) - zt) > 0.2;
+      return n.floorsHere < t.floorsHere;
+    };
+    if (roof === 'telha') {
       poly(ctx, top, '#8f9aa3');
       topXf(ctx, x, y, zt);
       ctx.fillStyle = 'rgba(40,50,60,0.25)';
       for (let u = 0.08; u < 1; u += 0.14) ctx.fillRect(u, 0, 0.035, 1);
       ctx.restore();
     } else {
-      poly(ctx, top, '#bdb7ac');
+      poly(ctx, top, deck ? '#c4bdb0' : '#bdb7ac');
+      if (deck) {                                        // piso cimentado com juntas
+        topXf(ctx, x, y, zt);
+        ctx.fillStyle = 'rgba(90,85,75,0.18)';
+        for (let k = 1; k < 3; k++) { ctx.fillRect(k / 3 - 0.008, 0, 0.016, 1); ctx.fillRect(0, k / 3 - 0.008, 1, 0.016); }
+        ctx.restore();
+      }
       const hs = AF.hash(x, y, 404);
       if (hs > 0.55) {
         topXf(ctx, x, y, zt);
@@ -416,14 +449,14 @@
         ctx.restore();
       }
     }
-    const mur = h.roof === 'laje' ? 0.6 : 0;
-    const topCol = h.styles[h.floors - 1];
+    const mur = deck ? 0.75 : roof === 'laje' ? 0.6 : 0;
+    const topCol = h.styles[t.floorsHere - 1];
     // mureta dos fundos
     if (mur) {
       if (ext(0, -1)) poly(ctx, [P(x, y, zt), P(x + 1, y, zt), P(x + 1, y, zt + mur), P(x, y, zt + mur)], '#a59f95');
       if (ext(-1, 0)) poly(ctx, [P(x, y, zt), P(x, y + 1, zt), P(x, y + 1, zt + mur), P(x, y, zt + mur)], '#b0aa9f');
     }
-    if (h.roof === 'obra') {
+    if (roof === 'obra') {
       const cs = [[0.08, 0.08], [0.92, 0.08], [0.08, 0.92], [0.92, 0.92]];
       for (const [u, v] of cs) {
         box(ctx, x + u - 0.05, y + v - 0.05, x + u + 0.05, y + v + 0.05, zt, zt + 1.4, '#aaa49a');
@@ -438,12 +471,13 @@
     // mureta da frente (continua a fachada)
     if (mur) {
       const col = topCol.brick ? '#b8633a' : topCol.color;
-      if (t.faces.L) poly(ctx, [P(x, y + 1, zt), P(x + 1, y + 1, zt), P(x + 1, y + 1, zt + mur), P(x, y + 1, zt + mur)], AF.shade(col, 0.88));
-      if (t.faces.R) poly(ctx, [P(x + 1, y, zt), P(x + 1, y + 1, zt), P(x + 1, y + 1, zt + mur), P(x + 1, y, zt + mur)], AF.shade(col, 0.66));
+      const fL = ext(0, 1), fR = ext(1, 0);
+      if (fL) poly(ctx, [P(x, y + 1, zt), P(x + 1, y + 1, zt), P(x + 1, y + 1, zt + mur), P(x, y + 1, zt + mur)], AF.shade(col, 0.88));
+      if (fR) poly(ctx, [P(x + 1, y, zt), P(x + 1, y + 1, zt), P(x + 1, y + 1, zt + mur), P(x + 1, y, zt + mur)], AF.shade(col, 0.66));
       ctx.strokeStyle = 'rgba(230,225,215,0.9)'; ctx.lineWidth = 1.5;
       ctx.beginPath();
-      if (t.faces.L) { const a = P(x, y + 1, zt + mur), b = P(x + 1, y + 1, zt + mur); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
-      if (t.faces.R) { const a = P(x + 1, y, zt + mur), b = P(x + 1, y + 1, zt + mur); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+      if (fL) { const a = P(x, y + 1, zt + mur), b = P(x + 1, y + 1, zt + mur); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+      if (fR) { const a = P(x + 1, y, zt + mur), b = P(x + 1, y + 1, zt + mur); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
       ctx.stroke();
     }
   }

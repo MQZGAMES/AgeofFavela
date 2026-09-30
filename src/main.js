@@ -67,7 +67,7 @@
     if (e.button !== 0) return;
     const [wx, wy] = toWorld(e.clientX, e.clientY);
     const t = W.pickTile(wx, wy);
-    if (t && !AF.leaveStairTo(player, t)) AF.goTo(W, player, t);
+    if (t) AF.goTo(W, player, t);
   });
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
@@ -277,7 +277,7 @@
   }
 
   function diamond(t, lift) {
-    const c = t.corners || [t.level, t.level, t.level, t.level];
+    const c = W.surfCorners(t);
     const l = lift || 0;
     ctx.beginPath();
     const pts = [P(t.x, t.y, c[0] + l), P(t.x + 1, t.y, c[1] + l), P(t.x + 1, t.y + 1, c[2] + l), P(t.x, t.y + 1, c[3] + l)];
@@ -294,8 +294,8 @@
     }
     if (player.path && player.goal) {
       ctx.fillStyle = 'rgba(255,225,77,0.55)';
-      for (const t of player.path) {
-        const [px, py] = P(t.x + 0.5, t.y + 0.5, W.groundAt(t.x + 0.5, t.y + 0.5));
+      for (const w of player.path) {
+        const [px, py] = P(w.x, w.y, W.groundAt(w.x, w.y));
         ctx.beginPath(); ctx.ellipse(px, py, 3.5, 1.8, 0, 0, TAU); ctx.fill();
       }
       const g = player.goal, pulse = 0.5 + 0.5 * Math.sin(time * 6);
@@ -311,8 +311,8 @@
       if (sx + HW < view.x0 || sx - HW > view.x1) continue;
       const cy = (t.x + t.y + 1) * HH;
       if (cy + HH < view.y0 || cy - t.top * UZ > view.y1) continue;
-      if (t.house) {
-        const zt = t.house.base + t.house.floors * CFG.FLOOR;
+      if (t.house && !t.surf) {
+        const zt = t.house.base + t.floorsHere * CFG.FLOOR;
         const c = [P(t.x, t.y, zt), P(t.x + 1, t.y, zt), P(t.x + 1, t.y + 1, zt), P(t.x, t.y + 1, zt)];
         ctx.beginPath(); ctx.moveTo(c[0][0], c[0][1]); for (let i = 1; i < 4; i++) ctx.lineTo(c[i][0], c[i][1]); ctx.closePath();
         ctx.fillStyle = 'rgba(255,40,40,0.22)'; ctx.fill();
@@ -328,12 +328,12 @@
       for (const [dx, dy] of [[1, 0], [0, 1]]) {
         const n = W.at(t.x + dx, t.y + dy);
         if (!n || !W.isWalk(n) || W.canStep(t, n)) continue;
-        const a = dx ? P(t.x + 1, t.y, t.level) : P(t.x, t.y + 1, t.level);
-        const b = P(t.x + 1, t.y + 1, t.level);
+        const a = dx ? P(t.x + 1, t.y, W.heightAt(t, t.x + 1, t.y)) : P(t.x, t.y + 1, W.heightAt(t, t.x, t.y + 1));
+        const b = P(t.x + 1, t.y + 1, W.heightAt(t, t.x + 1, t.y + 1));
         ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
       }
       ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
-      const lv = t.corners ? (t.corners[0] + t.corners[2]) / 2 : t.level;
+      const lv = W.heightAt(t, t.x + 0.5, t.y + 0.5);
       const [px, py] = P(t.x + 0.5, t.y + 0.5, lv);
       ctx.fillText(lv.toFixed(lv % 1 ? 1 : 0), px, py + 3);
     }
@@ -392,12 +392,10 @@
     state.hudT = 0.2;
     const t = W.at(Math.floor(player.x), Math.floor(player.y));
     let name = t ? AF.TYPE_NAME[t.type] : '—';
-    let hint = '';
-    if (player.stair) {
-      name = 'Escada externa';
-      hint = player.onLanding ? 'porta do puxadinho (entrar: em breve) · <kbd>S</kbd> desce'
-        : '<kbd>W</kbd>/<kbd>↑</kbd> sobe · <kbd>S</kbd>/<kbd>↓</kbd> desce';
-    } else if (AF.nearStair(W, player)) hint = '<kbd>E</kbd> subir a escada';
+    if (t && t.ramp) name = 'Escada da casa';
+    else if (t && t.surf) name = t.house.access && t.house.access.mode === 'laje' ? 'Laje' : 'Terraço do puxadinho';
+    const door = AF.nearDoor(W, player);
+    const hint = door ? `${door.label} · entrar: em breve` : '';
     const alt = (player.z * 0.75).toFixed(1);
     hud.innerHTML = (hint ? `<span class="hint">${hint}</span> · ` : '') +
       `<b>${name}</b> · altitude ${alt} m · tile (${Math.floor(player.x)}, ${Math.floor(player.y)})` +

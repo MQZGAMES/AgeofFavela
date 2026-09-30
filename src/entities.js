@@ -8,17 +8,26 @@
   const DOGS = [['#c48a4a', null], ['#e8d6b0', '#8a5a2b'], ['#3a2c22', null], ['#d9d0c1', '#222'], ['#8a6a4a', '#f0e6d2']];
 
   // ------------------------------------------------------------ colisão
-  // Um ponto (nx, ny) é ocupável se os 4 cantos do círculo de colisão estão em tiles
-  // caminháveis com desnível <= STEP em relação ao tile atual, e fora de veículos.
+  // Um ponto (nx, ny) é ocupável se o centro e os 4 cantos do círculo de colisão estão sobre
+  // superfícies caminháveis cuja altura difere no máximo 1 degrau da altura atual — chão, rua,
+  // escada ou laje, tudo no mesmo sistema. Escadas e terraços viram parede/guarda-corpo sozinhos,
+  // porque o desnível para o beco é grande demais.
+  // Altura usada na colisão: superfície exata em escada/laje; nível do tile no chão comum
+  const hOf = (W, t, x, y) => (t.surf ? W.heightAt(t, x, y) : t.level);
+
   function canOccupy(W, e, nx, ny, vehicles) {
     const cur = W.at(Math.floor(e.x), Math.floor(e.y));
-    if (!cur) return false;
+    const ct = W.at(Math.floor(nx), Math.floor(ny));
+    if (!cur || !W.isWalk(ct)) return false;
+    // o centro se move de forma contínua (sem subir mais que 1 degrau de uma vez)…
+    const hNew = hOf(W, ct, nx, ny);
+    if (Math.abs(hNew - hOf(W, cur, e.x, e.y)) > CFG.STEP) return false;
+    // …e o corpo inteiro cabe na superfície em volta do novo centro (sem parede nem precipício)
     const r = CFG.RADIUS;
-    const pts = [[0, 0], [-r, -r], [r, -r], [r, r], [-r, r]];
-    for (const [ox, oy] of pts) {
-      const t = W.at(Math.floor(nx + ox), Math.floor(ny + oy));
-      if (!W.isWalk(t)) return false;
-      if (Math.abs(t.level - cur.level) > CFG.STEP) return false;
+    for (const [ox, oy] of [[-r, -r], [r, -r], [r, r], [-r, r]]) {
+      const px = nx + ox, py = ny + oy;
+      const t = W.at(Math.floor(px), Math.floor(py));
+      if (!W.isWalk(t) || Math.abs(hOf(W, t, px, py) - hNew) > CFG.STEP) return false;
     }
     if (vehicles) {
       for (const v of vehicles) {
@@ -49,7 +58,10 @@
 
   function settleZ(W, e, dt) {
     const target = W.groundAt(e.x, e.y);
-    e.z += (target - e.z) * Math.min(1, dt * 12);
+    // na escada a altura acompanha o passo; no chão, suaviza os degraus
+    const t = W.at(Math.floor(e.x), Math.floor(e.y));
+    if (t && t.surf) e.z += (target - e.z) * Math.min(1, dt * 25);
+    else e.z += (target - e.z) * Math.min(1, dt * 12);
   }
 
   // ------------------------------------------------------------ jogador
@@ -62,106 +74,19 @@
     };
   };
 
-  // ------------------------------------------------------------ escadas externas
-  // Caminho da escada de um puxadinho: lances em ziguezague colados na fachada, do chão até o patamar da porta.
-  const STAIR_OFF = 0.2;   // distância da parede (tiles)
-  function stairPath(h) {
-    if (h.stairPath) return h.stairPath;
-    const s = h.stair, t = s.tile, FL = CFG.FLOOR;
-    const at = u => s.side === 'L' ? [t.x + u, t.y + 1 + STAIR_OFF] : [t.x + 1 + STAIR_OFF, t.y + 1 - u];
-    const pts = [];
-    for (let k = 0; k < h.unitFloor; k++) {
-      const flip = s.dir * (k % 2 ? -1 : 1) < 0;
-      const U = u => flip ? 1 - u : u;
-      const z0 = h.base + k * FL, z1 = z0 + FL;
-      if (k === 0) pts.push([...at(U(0.04)), s.ground != null ? s.ground : z0]);
-      pts.push([...at(U(2 / 3)), z1]);
-      pts.push([...at(U(0.9)), z1]);
-    }
-    const len = [0];
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1], b = pts[i];
-      len.push(len[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1], (b[2] - a[2]) / FL));
-    }
-    h.stairPath = { pts, len, total: len[len.length - 1] };
-    return h.stairPath;
-  }
-  function stairPoint(sp, s) {
-    let i = 1;
-    while (i < sp.pts.length - 1 && sp.len[i] < s) i++;
-    const a = sp.pts[i - 1], b = sp.pts[i], f = (s - sp.len[i - 1]) / ((sp.len[i] - sp.len[i - 1]) || 1);
-    return { x: a[0] + (b[0] - a[0]) * f, y: a[1] + (b[1] - a[1]) * f, z: a[2] + (b[2] - a[2]) * f, dx: b[0] - a[0], dy: b[1] - a[1] };
-  }
-  // Escada cujo pé está perto do jogador
-  AF.nearStair = function (W, p) {
-    if (!W.stairHouses) W.stairHouses = W.houses.filter(h => h.stair);
-    for (const h of W.stairHouses) {
-      const b = stairPath(h).pts[0];
-      if (Math.hypot(p.x - b[0], p.y - b[1]) < 0.55 && Math.abs(p.z - b[2]) < 1.2) return h;
-    }
-    return null;
-  };
-
-  function updateOnStair(p, input, dt) {
-    const st = p.stair, sp = stairPath(st.house);
-    const cur = stairPoint(sp, st.s);
-    // "subir" = para cima na tela, ou no sentido do lance atual
-    const sdx = cur.dx - cur.dy;
-    let climb = -(input.gx + input.gy) + Math.sign(sdx) * (input.gx - input.gy) * 0.8;
-    if (st.auto) climb = st.auto;
-    const speed = 0.9 * (input.run ? CFG.RUN : 1);
-    let moved = 0;
-    if (Math.abs(climb) > 0.1) {
-      const ns = AF.clamp(st.s + Math.sign(climb) * speed * dt, 0, sp.total);
-      moved = Math.abs(ns - st.s); st.s = ns;
-    }
-    const q = stairPoint(sp, st.s);
-    p.x = q.x; p.y = q.y; p.z = q.z;
-    if (moved) setFacing(p, q.dx * Math.sign(climb), q.dy * Math.sign(climb));
-    p.moving = moved > 0.0005;
-    if (p.moving) p.phase += moved * 12;
-    p.onLanding = st.s >= sp.total - 0.01;
-    if (st.s <= 0 && climb < 0) {          // desceu até o chão
-      p.stair = null;
-      if (st.then) AF.goTo(st.W, p, st.then);
-    }
-  }
-
-  AF.enterStair = function (W, p, h) {
-    p.path = null; p.goal = null;
-    p.stair = { house: h, s: 0, W };
-  };
-  // Clique fora da escada: desce sozinho e depois segue para o destino
-  AF.leaveStairTo = function (p, tile) {
-    if (!p.stair) return false;
-    p.stair.auto = -1; p.stair.then = tile;
-    return true;
-  };
-
   AF.updatePlayer = function (W, p, input, dt, vehicles) {
-    if (p.stair) { updateOnStair(p, input, dt); return; }
-    p.onLanding = false;
     let gx = input.gx, gy = input.gy;
     const speed = CFG.SPEED * (input.run ? CFG.RUN : 1);
     let moved = 0;
-    const near = AF.nearStair(W, p);
-    if (near && input.interact) { AF.enterStair(W, p, near); return; }
     if (gx || gy) {
       p.path = null; p.goal = null;
       const n = Math.hypot(gx, gy); gx /= n; gy /= n;
       moved = moveEntity(W, p, gx * speed * dt, gy * speed * dt, vehicles);
       setFacing(p, gx, gy);
-      // andar de encontro à parede no pé da escada também sobe
-      if (near && moved < speed * dt * 0.3) {
-        const t = near.stair.tile;
-        const wallDir = near.stair.side === 'L' ? -gy : -gx;
-        if (wallDir > 0.5 && t) { p.bump = (p.bump || 0) + dt; if (p.bump > 0.15) { p.bump = 0; AF.enterStair(W, p, near); return; } }
-      } else p.bump = 0;
     } else if (p.path && p.path.length) {
-      const t = p.path[0];
-      const tx = t.x + 0.5, ty = t.y + 0.5;
-      const dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy);
-      if (d < 0.08) { p.path.shift(); if (!p.path.length) { p.path = null; p.goal = null; } }
+      const w = p.path[0];
+      const dx = w.x - p.x, dy = w.y - p.y, d = Math.hypot(dx, dy);
+      if (d < 0.06) { p.path.shift(); if (!p.path.length) { p.path = null; p.goal = null; } }
       else {
         const step = Math.min(d, speed * dt);
         moved = moveEntity(W, p, dx / d * step, dy / d * step, vehicles);
@@ -175,14 +100,39 @@
     settleZ(W, p, dt);
   };
 
+  // Caminho A* convertido em waypoints: nas passagens que envolvem escada/laje, entra e sai
+  // pelo ponto da aresta onde o desnível é menor (o patamar da escada), não pelo centro do tile.
   AF.goTo = function (W, p, tile) {
     const start = W.at(Math.floor(p.x), Math.floor(p.y));
     const goal = W.nearestWalkable(tile, p);
     if (!goal) return false;
-    const path = W.findPath(start, goal);
-    if (!path) return false;
-    p.path = path; p.goal = goal; p.stuck = 0;
+    const tiles = W.findPath(start, goal);
+    if (!tiles) return false;
+    const pts = [];
+    let prev = start;
+    for (const t of tiles) {
+      if (prev.surf || t.surf) {
+        const c = W.crossing(prev, t);
+        if (c) {
+          const nx = t.x - prev.x, ny = t.y - prev.y, IN = 0.22;
+          pts.push({ x: c[0] - nx * IN, y: c[1] - ny * IN });
+          pts.push({ x: c[0] + nx * IN, y: c[1] + ny * IN });
+        }
+      }
+      pts.push({ x: t.x + 0.5, y: t.y + 0.5 });
+      prev = t;
+    }
+    p.path = pts; p.goal = goal; p.stuck = 0;
     return true;
+  };
+
+  // Porta mais próxima do jogador (para a dica no HUD)
+  AF.nearDoor = function (W, p) {
+    if (!W.doorSpots) return null;
+    for (const d of W.doorSpots) {
+      if (Math.hypot(p.x - d.x, p.y - d.y) < 0.45 && Math.abs(p.z - d.z) < 1) return d;
+    }
+    return null;
   };
 
   // ------------------------------------------------------------ moradores e cães
@@ -219,7 +169,7 @@
         const opts = [];
         for (const [ox, oy] of AF.DIR4) {
           const n = W.at(cur.x + ox, cur.y + oy);
-          if (!n || !W.canStep(cur, n) || n.type === T.ROAD || n.type === T.AVENUE) continue;
+          if (!n || n.surf || !W.canStep(cur, n) || n.type === T.ROAD || n.type === T.AVENUE) continue;
           // prefere seguir em frente
           const same = Math.sign(ox) === Math.sign(e.lx || 0) && Math.sign(oy) === Math.sign(e.ly || 0);
           opts.push(n); if (same) { opts.push(n); opts.push(n); }

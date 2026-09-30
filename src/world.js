@@ -2,6 +2,8 @@
 (function (AF) {
   const { CFG, T } = AF;
   const FL = CFG.FLOOR;
+  const RAMP_FLAT = 0.36;  // primeiros 36% da escada são patamar plano (entrada fácil)
+  AF.RAMP_FLAT = RAMP_FLAT;
   const DIR4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   const DIR8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   AF.DIR4 = DIR4;
@@ -54,16 +56,66 @@
     }
 
     at(x, y) { return (x < 0 || y < 0 || x >= this.N || y >= this.N) ? null : this.tiles[y * this.N + x]; }
-    isWalk(t) { return !!t && AF.WALK.has(t.type) && !t.block; }
-    canStep(a, b) { return this.isWalk(b) && Math.abs(a.level - b.level) <= CFG.STEP; }
 
-    // Altura do chão numa posição contínua (rampas da rua são interpoladas por vértice)
-    groundAt(gx, gy) {
-      const t = this.at(Math.floor(gx), Math.floor(gy));
-      if (!t) return 0;
+    // Um tile é caminhável pelo chão (becos, ruas…) ou por uma superfície elevada (escada / laje)
+    isWalk(t) {
+      if (!t) return false;
+      if (t.surf) return !t.surfBlock;
+      return AF.WALK.has(t.type) && !t.block;
+    }
+
+    // Altura da superfície caminhável de t no ponto (gx, gy): chão, rampa da rua, escada ou laje
+    heightAt(t, gx, gy) {
+      const s = t.surf;
+      if (s) {
+        if (s.kind === 'deck') return s.h;
+        let f = s.axis === 'x' ? gx - t.x : gy - t.y;
+        if (s.dir < 0) f = 1 - f;
+        return s.lo + (s.hi - s.lo) * AF.clamp((f - RAMP_FLAT) / (1 - RAMP_FLAT), 0, 1);
+      }
       if (!t.corners) return t.level;
       const fx = gx - t.x, fy = gy - t.y, c = t.corners;
       return c[0] * (1 - fx) * (1 - fy) + c[1] * fx * (1 - fy) + c[2] * fx * fy + c[3] * (1 - fx) * fy;
+    }
+    groundAt(gx, gy) {
+      const t = this.at(Math.floor(gx), Math.floor(gy));
+      return t ? this.heightAt(t, gx, gy) : 0;
+    }
+    // Altura no meio da aresta de t voltada para (dx, dy)
+    edgeHeight(t, dx, dy) { return this.heightAt(t, t.x + 0.5 + dx * 0.5, t.y + 0.5 + dy * 0.5); }
+    // Alturas nos 4 vértices (N, E, S, W) da superfície caminhável
+    surfCorners(t) {
+      if (t.surf) return [this.heightAt(t, t.x, t.y), this.heightAt(t, t.x + 1, t.y), this.heightAt(t, t.x + 1, t.y + 1), this.heightAt(t, t.x, t.y + 1)];
+      return t.corners || [t.level, t.level, t.level, t.level];
+    }
+
+    // Dá para passar de a para b? No chão comum compara os níveis; com escada/laje procura
+    // um ponto da aresta comum com desnível <= 1 degrau (diagonais só em chão comum).
+    canStep(a, b) {
+      if (!this.isWalk(b)) return false;
+      if (!a.surf && !b.surf) return Math.abs(a.level - b.level) <= CFG.STEP;
+      if (a.x !== b.x && a.y !== b.y) return false;
+      return !!this.crossing(a, b);
+    }
+    // Melhor ponto de passagem na aresta comum: o corpo inteiro (largura 2·raio) precisa caber
+    // com desnível <= 1 degrau dos dois lados. Empate -> mais perto do meio da aresta.
+    crossing(a, b) {
+      const dx = b.x - a.x, dy = b.y - a.y, r = CFG.RADIUS + 0.01;
+      const pt = s => [dx ? Math.max(a.x, b.x) : a.x + s, dy ? Math.max(a.y, b.y) : a.y + s];
+      const H = (t, x, y) => (t.surf ? this.heightAt(t, x, y) : t.level);   // mesma regra da colisão
+      let best = null, bd = Infinity;
+      for (let s = 0.18; s <= 0.821; s += 0.02) {
+        const [px, py] = pt(s), ha = H(a, px, py), hb = H(b, px, py);
+        // simétrico: com o centro de qualquer lado, o corpo todo precisa caber
+        let d = Math.abs(ha - hb);
+        for (const o of [-r, r]) {
+          const [qx, qy] = pt(s + o), qa = H(a, qx, qy), qb = H(b, qx, qy);
+          d = Math.max(d, Math.abs(qb - ha), Math.abs(qa - hb), Math.abs(qa - ha), Math.abs(qb - hb));
+        }
+        d += Math.abs(s - 0.5) * 0.01;
+        if (d < bd) { bd = d; best = [px, py]; }
+      }
+      return bd <= CFG.STEP + 0.01 ? best : null;
     }
 
     // ---------------------------------------------------------------- geração
@@ -239,9 +291,6 @@
         if (AF.WALK.has(t.type) && !r.seen[t.i]) { t.type = T.LOT; t.ceramic = false; }
       }
 
-      // Toda casa precisa de uma porta acessível: se não tiver, abre um beco até ela
-      this.ensureAccess(rng, hill);
-
       // Rampas da rua: altura por vértice = média dos tiles de rua que compartilham o vértice
       const cv = (cx, cy, fallback) => {
         let s = 0, n = 0;
@@ -256,6 +305,10 @@
         t.corners = [cv(t.x, t.y, t.level), cv(t.x + 1, t.y, t.level), cv(t.x + 1, t.y + 1, t.level), cv(t.x, t.y + 1, t.level)];
       }
 
+      // Toda casa precisa de uma porta acessível: se não tiver, abre um beco até ela
+      this.ensureAccess(rng, hill);
+
+      this.planAccess(rng);
       this.walkCount = this.reach().count;
       this.decorate(rng);
       this.computeTops();
@@ -325,12 +378,94 @@
         if (!h.tiles.length) continue;
         h.door = this.findDoor(h, seen);
         if (!h.door) { for (const t of h.tiles) { t.type = T.LOT; t.house = null; } h.tiles = []; continue; }
-        // fundação acompanha a porta: no máximo 1 degrau de soleira
-        const nl = Math.round(h.door.nb.level);
-        h.base = nl + AF.clamp(h.base - nl, -1, 1);
+        // fundação no nível exato da soleira: a borda do chão em frente à porta (sem degrau nem piso cobrindo)
+        const d = h.door, dx = d.nb.x - d.tile.x, dy = d.nb.y - d.tile.y;
+        h.base = this.edgeHeight(d.nb, -dx, -dy);
         for (const t of h.tiles) t.level = h.base;
       }
       this.houses = this.houses.filter(h => h.tiles.length);
+    }
+
+    // Módulo de acesso vertical, dentro do terreno da casa (não ocupa beco):
+    //  - 'unit' (puxadinho): na fileira da frente, 1–2 tiles viram escada e o resto vira terraço na altura
+    //    do andar de cima; a unidade de cima recua uma fileira e sua porta abre para o terraço.
+    //  - 'laje': casa de 1–2 andares com escada até o teto; a laje inteira vira área caminhável.
+    planAccess(rng) {
+      const at = (x, y) => this.at(x, y);
+      const seen = this.reach().seen;
+      for (const h of this.houses) for (const t of h.tiles) { t.floorsHere = h.floors; t.surf = null; t.ramp = null; t.surfBlock = false; }
+      for (const h of this.houses) {
+        if (h.door) h.door.nb.reserved = true;
+        let mode = null, uf = 0;
+        if (h.unitFloor) { mode = 'unit'; uf = h.floors >= 3 && rng.chance(0.35) ? 2 : 1; }
+        else if (h.roof === 'laje' && h.floors <= 2 && rng.chance(0.4)) { mode = 'laje'; uf = h.floors; }
+        h.unitFloor = 0;
+        if (!mode) continue;
+        const inH = t => !!t && t.house === h;
+        const okEntry = n => n && n.house !== h && AF.WALK.has(n.type) && n.type !== T.AVENUE && !n.block && seen[n.i] && Math.abs(n.level - h.base) <= 1;
+        const options = [];
+        for (const [side, dx, dy] of [['L', 0, 1], ['R', 1, 0]]) {
+          const ax = dy ? 1 : 0, ay = dx ? 1 : 0;                 // eixo da fileira da frente
+          const key = t => (dy ? t.y : t.x), pos = t => (dy ? t.x : t.y);
+          const rows = new Map();
+          for (const t of h.tiles) {
+            if (inH(at(t.x + dx, t.y + dy))) continue;
+            if (!rows.has(key(t))) rows.set(key(t), []);
+            rows.get(key(t)).push(t);
+          }
+          for (const g of rows.values()) {
+            g.sort((a, b) => pos(a) - pos(b));
+            const runs = [[g[0]]];
+            for (let i = 1; i < g.length; i++) {
+              if (pos(g[i]) === pos(g[i - 1]) + 1) runs[runs.length - 1].push(g[i]); else runs.push([g[i]]);
+            }
+            for (const run of runs) {
+              if (run.length < uf + 1) continue;
+              for (const rev of [false, true]) {
+                const seq = rev ? run.slice().reverse() : run;
+                const ramps = seq.slice(0, uf), terr = seq.slice(uf), rise = rev ? -1 : 1;
+                if (h.door && ramps.includes(h.door.tile)) continue;
+                const r0 = ramps[0];
+                const entries = [at(r0.x + dx, r0.y + dy), at(r0.x - ax * rise, r0.y - ay * rise)].filter(okEntry);
+                if (!entries.length) continue;
+                let upper = null;
+                if (mode === 'unit') {
+                  for (const tt of terr) {
+                    const b = at(tt.x - dx, tt.y - dy);
+                    if (inH(b) && !seq.includes(b)) { upper = { tile: b, side, floor: uf, front: tt }; break; }
+                  }
+                  if (!upper) continue;
+                }
+                options.push({ side, ax, rise, ramps, terr, entries, upper });
+              }
+            }
+          }
+        }
+        if (!options.length) continue;
+        const o = rng.pick(options);
+        o.ramps.forEach((t, j) => {
+          t.floorsHere = j;
+          t.ramp = { axis: o.ax ? 'x' : 'y', dir: o.rise, front: o.side, j };
+          t.surf = { kind: 'ramp', axis: t.ramp.axis, dir: o.rise, lo: h.base + j * FL, hi: h.base + (j + 1) * FL };
+        });
+        const deckH = h.base + uf * FL;
+        const decks = mode === 'laje' ? h.tiles.filter(t => !t.ramp) : o.terr;
+        for (const t of decks) { t.floorsHere = uf; t.surf = { kind: 'deck', h: deckH }; }
+        for (const e of o.entries) e.reserved = true;
+        h.access = { mode, uf, side: o.side, top: o.terr[0] };
+        if (o.upper) { h.unitFloor = uf; h.upperDoor = o.upper; }
+        // laje acessível: a caixa-d'água fica no tile mais longe da escada (e bloqueia só ele)
+        if (mode === 'laje' && decks.length >= 3) {
+          const top = o.terr[0];
+          const far = decks.reduce((a, b) => (Math.abs(b.x - top.x) + Math.abs(b.y - top.y) > Math.abs(a.x - top.x) + Math.abs(a.y - top.y) ? b : a));
+          far.surfBlock = true; h.tankTile = far;
+        }
+      }
+      // trechos de laje que ficaram isolados (casas de formato irregular) voltam a ser teto comum
+      const reach = this.reach().seen;
+      for (const h of this.houses) for (const t of h.tiles) {
+        if (t.surf && t.surf.kind === 'deck' && !t.surfBlock && !reach[t.i]) t.surf = null;
+      }
     }
 
     makeHouse(rng, id) {
@@ -347,63 +482,64 @@
       }
       const topBrick = styles[floors - 1].brick;
       const roof = topBrick && rng.chance(0.55) ? 'obra' : rng.chance(0.14) ? 'telha' : 'laje';
-      // Andar de cima de outra família ("puxadinho"), com acesso próprio por escada externa
-      const unitFloor = floors >= 2 && rng.chance(0.5) ? rng.int(1, floors - 1) : 0;
-      return { id, floors, styles, roof, tiles: [], base: 0, shop: null, unitFloor, stair: null, door: null };
+      // Andar de cima de outra família ("puxadinho"): o planAccess decide se cabe escada + terraço
+      const unitFloor = floors >= 2 && rng.chance(0.55) ? 1 : 0;
+      return { id, floors, styles, roof, tiles: [], base: 0, shop: null, unitFloor, door: null, upperDoor: null, access: null };
     }
 
     decorate(rng) {
       const at = (x, y) => this.at(x, y);
       const tiles = this.tiles;
 
-      // Escada externa do puxadinho: numa face visível voltada para caminho, de preferência longe da porta
-      const sideNb = (t, side) => side === 'L' ? at(t.x, t.y + 1) : at(t.x + 1, t.y);
-      for (const h of this.houses) {
-        if (h.door) h.door.nb.reserved = true;
-        if (!h.unitFloor) continue;
-        const opts = [];
-        for (const t of h.tiles) for (const side of ['L', 'R']) {
-          const nb = sideNb(t, side);
-          if (!nb || nb.house === h || !AF.WALK.has(nb.type) || nb.type === T.AVENUE || Math.abs(nb.level - h.base) > 1.5) continue;
-          const isDoor = h.door && h.door.tile === t && h.door.side === side;
-          opts.push({ tile: t, side, nb, w: isDoor ? 1 : 4 });
-        }
-        if (!opts.length) { h.unitFloor = 0; continue; }
-        const best = opts.filter(o => o.w === 4);
-        const s = rng.pick(best.length ? best : opts);
-        h.stair = { tile: s.tile, side: s.side, dir: rng.chance(0.5) ? 1 : -1, ground: s.nb.level };
-        s.nb.reserved = true;
-      }
-
-      // Fachadas, comércio, grafites e itens de laje
+      // Fachadas (por pavimento), comércio, grafites e itens de laje
+      this.doorSpots = [];
       for (const t of tiles) {
         if (t.type !== T.HOUSE) continue;
         const h = t.house;
         t.faces = {};
         for (const side of ['L', 'R']) {
-          const nb = side === 'L' ? at(t.x, t.y + 1) : at(t.x + 1, t.y);
-          if (nb && nb.house === h) { t.faces[side] = null; continue; }
-          const open = !!nb && AF.WALK.has(nb.type) && Math.abs(nb.level - t.level) <= 1.5;
-          const d = { open, shop: null, door: false, graf: null, win: [], ac: rng.chance(0.22), doorC: rng.pick(DOORS), stair: null };
-          const mainDoor = h.door && h.door.tile === t && h.door.side === side;
-          if (h.stair && h.stair.tile === t && h.stair.side === side) d.stair = { floor: h.unitFloor, dir: h.stair.dir };
-          if (open || mainDoor) {
-            if (!h.shop && !d.stair && nb.type !== T.AVENUE && rng.chance(0.12)) {
+          const dx = side === 'R' ? 1 : 0, dy = side === 'L' ? 1 : 0;
+          const nb = at(t.x + dx, t.y + dy);
+          const same = !!nb && nb.house === h;
+          const from = same ? nb.floorsHere : 0;          // pavimentos escondidos atrás do vizinho da mesma casa
+          if (from >= t.floorsHere) { t.faces[side] = null; continue; }
+          // porta/loja só onde a soleira coincide com o chão da frente (sem degrau, sem piso cobrindo)
+          const flush = !same && !!nb && AF.WALK.has(nb.type) && !nb.block && Math.abs(this.edgeHeight(nb, -dx, -dy) - h.base) < 0.15;
+          const d = { from, flush, shop: null, door: false, graf: null, win: [], ac: rng.chance(0.22), doorC: rng.pick(DOORS), upper: -1 };
+          const mainDoor = !!h.door && h.door.tile === t && h.door.side === side;
+          if (h.upperDoor && h.upperDoor.tile === t && h.upperDoor.side === side) d.upper = h.upperDoor.floor;
+          if (from === 0 && (flush || mainDoor)) {
+            if (!h.shop && nb.type !== T.AVENUE && rng.chance(0.12)) {
               const sh = rng.pick(SHOPS);
               d.shop = { kind: sh.kind, name: rng.pick(sh.names) };
               h.shop = d.shop;
-            } else d.door = mainDoor || (!d.stair && rng.chance(0.3));
+            } else d.door = mainDoor || rng.chance(0.3);
           }
-          if (!d.shop && rng.chance(open ? 0.32 : 0.14)) {
+          if (from === 0 && !d.shop && rng.chance(flush ? 0.32 : 0.14)) {
             d.graf = { text: rng.pick(TAGS), color: rng.pick(GRAF), rot: rng.range(-0.18, 0.08), u: rng.range(3, 12), v: rng.range(40, 50) };
           }
           for (let k = 0; k < h.floors; k++) d.win.push(rng.int(0, 5));
           t.faces[side] = d;
+          if (d.door || d.shop) nb.reserved = true;       // frente de porta/loja nunca recebe prop
+          const off = 0.3, px = side === 'L' ? t.x + 0.5 : t.x + 1 + off, py = side === 'L' ? t.y + 1 + off : t.y + 0.5;
+          if (d.door || d.shop) this.doorSpots.push({ x: px, y: py, z: h.base, label: d.shop ? d.shop.name : 'Porta' });
+          if (d.upper > 0) this.doorSpots.push({ x: px, y: py, z: h.base + d.upper * FL, label: 'Porta do puxadinho' });
         }
+        if (t.ramp) continue;
+        const deck = !!t.surf;
         const slots = AF.shuffle([[0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7]], rng);
         let si = 0;
-        if (h.roof !== 'telha' && t === h.tiles[0]) { t.roof.push({ kind: 'tank', u: slots[si][0], v: slots[si][1] }); si++; }
-        if (h.roof === 'laje') {
+        const tankHere = h.tankTile ? t === h.tankTile : !deck && t === h.tiles.find(q => !q.surf && !q.ramp);
+        if (h.roof !== 'telha' && tankHere) { t.roof.push({ kind: 'tank', u: slots[0][0], v: slots[0][1] }); si = 1; }
+        if (deck) {
+          // terraço/laje caminhável: só itens baixos que não atrapalham a passagem
+          const n = rng.int(0, 2);
+          for (let k = 0; k < n; k++) {
+            const kind = rng.pick(['varal', 'chair', 'plant', 'plant']);
+            t.roof.push({ kind, u: kind === 'varal' ? 0.5 : slots[si][0], v: slots[si][1], c: rng.int(0, 1e6) });
+            si++;
+          }
+        } else if (h.roof === 'laje') {
           const n = rng.int(0, 2);
           for (let k = 0; k < n; k++) {
             const kind = rng.pick(['dish', 'fish', 'varal', 'varal', 'bbq', 'chair', 'plant', 'plant']);
@@ -450,8 +586,13 @@
           const d = t.faces[side];
           if (!d || !d.shop || d.shop.kind !== 'bar') continue;
           const nb = side === 'L' ? at(t.x, t.y + 1) : at(t.x + 1, t.y);
-          if (nb && !nb.block && (nb.type === T.BECO || nb.type === T.PLAZA || nb.type === T.SIDEWALK)) {
-            tryBlock(nb, { kind: 'mesa', u: 0.5, v: 0.5, c: rng.pick(['#f1c40f', '#e74c3c']) });
+          if (!nb) continue;
+          // a frente da porta fica livre: as mesas vão para o lado, ao longo da fachada
+          const along = side === 'L' ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
+          const col = rng.pick(['#f1c40f', '#e74c3c']);
+          for (const [ax, ay] of along) {
+            const m = at(nb.x + ax, nb.y + ay);
+            if (m && !m.block && (m.type === T.BECO || m.type === T.PLAZA || m.type === T.SIDEWALK) && tryBlock(m, { kind: 'mesa', u: 0.5, v: 0.5, c: col })) break;
           }
         }
       }
@@ -488,8 +629,8 @@
       }
       const wires = this.wires = [];
       const seen = new Set();
-      const houseTiles = tiles.filter(t => t.type === T.HOUSE);
-      const roofZ = h => h.house.base + h.house.floors * FL - 0.8;
+      const houseTiles = tiles.filter(t => t.type === T.HOUSE && !t.surf);
+      const roofZ = h => h.house.base + h.floorsHere * FL - 0.8;
       poles.forEach((a, i) => {
         const near = poles.map((b, j) => ({ j, d: Math.hypot(a.x - b.x, a.y - b.y) }))
           .filter(o => o.j !== i && o.d < 9).sort((p, q) => p.d - q.d).slice(0, 2);
@@ -524,7 +665,9 @@
         t.structTop = 0; t.tall = false;
         if (t.house) {
           const h = t.house;
-          t.structTop = h.base + h.floors * FL + (t.roof.length ? 1.6 : 0.6) + (h.roof === 'obra' ? 1.6 : 0);
+          if (t.ramp) t.structTop = t.surf.hi + 1.6;
+          else if (t.surf) t.structTop = t.surf.h + (t.roof.length ? 1.6 : 0.8);
+          else t.structTop = h.base + t.floorsHere * FL + (t.roof.length ? 1.6 : 0.6) + (h.roof === 'obra' ? 1.6 : 0);
           t.tall = true; top = t.structTop;
         }
         for (const p of t.props) {
@@ -596,8 +739,8 @@
       for (let s = 2 * N - 2; s >= 0; s--) {
         for (let x = Math.min(N - 1, s); x >= Math.max(0, s - N + 1); x--) {
           const y = s - x, t = this.tiles[y * N + x];
-          if (!AF.WALK.has(t.type)) continue;
-          const lv = t.corners ? (t.corners[0] + t.corners[1] + t.corners[2] + t.corners[3]) / 4 : t.level;
+          if (!AF.WALK.has(t.type) && !t.surf) continue;
+          const c = this.surfCorners(t), lv = (c[0] + c[1] + c[2] + c[3]) / 4;
           const cx = (x - y) * HW, cy = (x + y + 1) * HH - lv * UZ;
           if (Math.abs(wx - cx) / HW + Math.abs(wy - cy) / HH <= 1) return t;
         }

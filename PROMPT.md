@@ -49,3 +49,43 @@ Um protótipo jogável 2.5D **isométrico** (projeção 2:1) ambientado em uma f
 3. Ao entrar num beco atrás de uma casa alta, a casa fica translúcida e a silhueta aparece.
 4. Todo tile caminhável é alcançável; click-to-move encontra caminho por becos e escadarias.
 5. Roda a 60 fps num notebook comum.
+
+---
+
+# Fase 3 — Acessos verticais (prompt otimizado)
+
+## Problema
+- As escadas externas eram só um desenho na fachada, com um "modo escada" ativado pela tecla `E`.
+- Não havia espaço na frente da porta do andar de cima.
+- Algumas portas do térreo apareciam com degrau na frente ou com a parte de baixo coberta pelo piso do beco.
+
+## Objetivo
+Escadas, patamares e lajes passam a ser **superfícies caminháveis de verdade**, no mesmo sistema de colisão do chão. O jogador sobe andando, sem tecla nenhuma, e nenhuma porta fica "enterrada" ou "flutuando".
+
+## Requisitos
+1. **Superfícies por tile**: além do chão, um tile de casa pode ter:
+   - uma **escada**: rampa que sobe 1 pavimento por tile, ao longo da fachada, com um patamar plano nos primeiros 30% para facilitar a entrada;
+   - ou uma **laje/terraço** (deck plano na altura do piso do andar).
+   A altura é calculada por ponto (`heightAt`). A colisão compara a altura do ponto com a altura atual (limite: 1 degrau). A escada e o terraço fazem a vez da parede e do guarda-corpo, porque o desnível para o beco é grande demais para passar.
+2. **Módulo de acesso** na geração, sempre dentro do terreno da própria casa, sem ocupar beco:
+   - **Puxadinho**: na fileira da frente da casa, os primeiros 1 ou 2 tiles viram escada e os demais viram **terraço** na altura do andar de cima. A unidade de cima recua uma fileira, e a **porta dela abre para o terraço**. A porta do térreo continua embaixo do terraço.
+   - **Laje acessível**: em casas de 1 ou 2 andares, uma escada leva ao teto, e a laje inteira vira área de convivência com varal, cadeira e vasos. A caixa-d'água bloqueia o próprio tile.
+   - A entrada da escada, pela frente ou pela ponta, precisa estar num caminho alcançável a no máximo 1 degrau, e esse tile fica reservado, sem props.
+3. **Portas no nível certo**:
+   - A fundação da casa é igual à altura da borda do tile da porta, inclusive nas rampas da rua.
+   - Portas e comércios secundários só aparecem onde a soleira coincide com o chão da frente (tolerância de 0,15).
+4. **Navegação**:
+   - A\* usa `canStep` por aresta: existe um ponto da aresta comum com desnível de até 1.
+   - O caminho vira uma lista de **waypoints**, que entram na escada pelo ponto de passagem (o patamar) e não pelo centro do tile.
+   - NPCs continuam só no chão.
+5. **Visual**:
+   - Degraus empilhados com espelho e piso, corrimão acompanhando a inclinação e patamar de concreto.
+   - Terraço com mureta nas bordas abertas e parede com a porta de cima.
+   - Faces de fachada desenhadas por pavimento: só aparecem acima do vizinho mais baixo.
+6. **HUD**: dica ao chegar numa porta ("Porta · entrar: em breve").
+
+## Critérios de aceite
+- Em todos os seeds de teste: 100% das escadas são alcançáveis andando, a partir do spawn, e levam ao terraço ou laje.
+- Todo terraço de puxadinho tem porta a no máximo 1 tile.
+- 0 portas com soleira fora do nível do chão da frente.
+- O click-to-move sobe e desce escadas sem travar.
