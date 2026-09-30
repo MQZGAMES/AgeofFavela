@@ -10,6 +10,7 @@
   AF.P = P;
 
   const R = AF.R = {};
+  AF.view = { cutaway: false };
   let brickPat = null, grime = null;
 
   R.init = function (ctx) {
@@ -202,7 +203,8 @@
   // ------------------------------------------------------------ casas
   function drawHouse(ctx, W, t, time) {
     const h = t.house, x = t.x, y = t.y, base = h.base;
-    for (let k = 0; k < h.floors; k++) {
+    const floors = AF.view.cutaway ? 1 : h.floors;
+    for (let k = 0; k < floors; k++) {
       const st = h.styles[k], z1 = base + (k + 1) * FL;
       for (const side of ['L', 'R']) {
         const d = t.faces[side];
@@ -227,7 +229,20 @@
         ctx.restore();
       }
     }
-    drawRoof(ctx, W, t, time);
+    if (AF.view.cutaway && h.floors > 1) drawCut(ctx, W, t, base + FL);
+    else drawRoof(ctx, W, t, time);
+  }
+
+  // Modo térreo: topo em corte, mostrando a espessura das paredes externas
+  function drawCut(ctx, W, t, zt) {
+    const x = t.x, y = t.y, h = t.house;
+    poly(ctx, [P(x, y, zt), P(x + 1, y, zt), P(x + 1, y + 1, zt), P(x, y + 1, zt)], '#6e6a64');
+    const ext = (dx, dy) => { const n = W.at(x + dx, y + dy); return !n || n.house !== h; };
+    const w = 0.09, c = '#d9d3c7';
+    if (ext(0, -1)) poly(ctx, [P(x, y, zt), P(x + 1, y, zt), P(x + 1, y + w, zt), P(x, y + w, zt)], c);
+    if (ext(-1, 0)) poly(ctx, [P(x, y, zt), P(x + w, y, zt), P(x + w, y + 1, zt), P(x, y + 1, zt)], c);
+    if (ext(0, 1)) poly(ctx, [P(x, y + 1 - w, zt), P(x + 1, y + 1 - w, zt), P(x + 1, y + 1, zt), P(x, y + 1, zt)], c);
+    if (ext(1, 0)) poly(ctx, [P(x + 1 - w, y, zt), P(x + 1, y, zt), P(x + 1, y + 1, zt), P(x + 1 - w, y + 1, zt)], c);
   }
 
   function windowDeco(ctx, w, st, d, k) {
@@ -617,6 +632,7 @@
 
   // ------------------------------------------------------------ fiação
   R.drawWires = function (ctx, W, view) {
+    if (AF.view.cutaway) return;
     ctx.strokeStyle = 'rgba(18,18,18,0.8)'; ctx.lineWidth = 1;
     ctx.beginPath();
     for (const w of W.wires) {

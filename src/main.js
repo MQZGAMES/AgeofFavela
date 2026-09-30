@@ -47,6 +47,7 @@
     state.keys.add(e.code);
     if (e.code === 'KeyG') state.debug = !state.debug;
     if (e.code === 'KeyX') state.xray = !state.xray;
+    if (e.code === 'KeyV') AF.view.cutaway = !AF.view.cutaway;
     if (e.code === 'KeyR') newWorld((Math.random() * 1e9) | 0);
     if (e.code === 'KeyH') document.getElementById('help').classList.toggle('hidden');
     if (e.code === 'Equal' || e.code === 'NumpadAdd') cam.zoom = Math.min(2.2, cam.zoom * 1.15);
@@ -73,6 +74,7 @@
   }, { passive: false });
   document.getElementById('btn-xray').onclick = () => { state.xray = !state.xray; };
   document.getElementById('btn-grid').onclick = () => { state.debug = !state.debug; };
+  document.getElementById('btn-cut').onclick = () => { AF.view.cutaway = !AF.view.cutaway; };
   document.getElementById('btn-new').onclick = () => newWorld((Math.random() * 1e9) | 0);
 
   function readInput() {
@@ -143,14 +145,15 @@
         if (base + HH < pp[1] - 70) continue;
         if (base - t.top * UZ - HH > pp[1]) continue;
         const gTop = t.corners ? Math.max(...t.corners) : t.level;
+        const sTop = AF.view.cutaway && t.house ? t.house.base + CFG.FLOOR : t.structTop;
         let hitStruct = false;
         for (let k = 0; k < samples.length; k++) {
           const [sx, sy] = samples[k];
           if (inColumn(t, sx, sy, -3, gTop)) covered[k] = 1;
-          else if (t.tall && inColumn(t, sx, sy, gTop, t.structTop)) { covered[k] = 1; hitStruct = true; }
+          else if (t.tall && inColumn(t, sx, sy, gTop, sTop)) { covered[k] = 1; hitStruct = true; }
         }
         if (t.tall && !hitStruct) {
-          for (const [sx, sy] of halo) if (inColumn(t, sx, sy, gTop, t.structTop)) { hitStruct = true; break; }
+          for (const [sx, sy] of halo) if (inColumn(t, sx, sy, gTop, sTop)) { hitStruct = true; break; }
         }
         if (hitStruct) fadeList.push(t);
       }
@@ -389,6 +392,7 @@
       ` · oclusão ${(state.coverage * 100) | 0}% · ${state.fps.toFixed(0)} fps`;
     document.getElementById('btn-xray').classList.toggle('on', state.xray);
     document.getElementById('btn-grid').classList.toggle('on', state.debug);
+    document.getElementById('btn-cut').classList.toggle('on', AF.view.cutaway);
   }
 
   function frame(now) {
