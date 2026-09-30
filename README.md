@@ -14,6 +14,7 @@ Protótipo 2.5D em perspectiva isométrica de um morro carioca gerado procedural
 | Andar em 8 direções | WASD / setas (W+D, S+A… seguem os eixos do grid, que é o sentido dos becos) |
 | Correr | Shift (gamepad: A / RT) |
 | Ir até um ponto | Clique ou toque num caminho (pathfinding A*) |
+| Subir escada externa | E no pé da escada (gamepad: A); W sobe, S desce |
 | Gamepad | Analógico ou D-pad |
 | Raio-X on/off | X |
 | Grade de colisão | G |
@@ -41,7 +42,7 @@ src/main.js      loop, input (teclado/mouse/toque/gamepad), câmera, raio-X, deb
 | Casa | 6×6 a 9×9 m | blocos de 2×2 a 3×3 tiles |
 
 - Toda casa tem **porta voltada para um caminho alcançável**. Quando a casa não tem nenhum caminho por perto, a geração abre um beco até ela. A fundação é ajustada para ficar a no máximo 1 degrau da soleira.
-- Quando um andar de cima é de **outra família** (`unitFloor`), ele ganha uma **escada externa em ziguezague** na fachada, com porta própria no patamar. A frente das portas e das escadas nunca recebe props que bloqueiam passagem.
+- Quando um andar de cima é de **outra família** (`unitFloor`), ele ganha uma **escada externa em ziguezague** na fachada, com porta própria no patamar. A escada é **percorrível**: no pé dela, `E` (ou andar contra a parede) sobe; W/↑ sobe e S/↓ desce; um clique no chão faz descer e seguir para o destino. A frente das portas e das escadas nunca recebe props que bloqueiam passagem.
 
 ### Mapa
 - **Altura por tile** em unidades de degrau (14 px). O terreno sobe para o fundo (−y) e um pouco para a esquerda (−x).

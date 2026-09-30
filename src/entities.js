@@ -62,15 +62,101 @@
     };
   };
 
+  // ------------------------------------------------------------ escadas externas
+  // Caminho da escada de um puxadinho: lances em ziguezague colados na fachada, do chão até o patamar da porta.
+  const STAIR_OFF = 0.2;   // distância da parede (tiles)
+  function stairPath(h) {
+    if (h.stairPath) return h.stairPath;
+    const s = h.stair, t = s.tile, FL = CFG.FLOOR;
+    const at = u => s.side === 'L' ? [t.x + u, t.y + 1 + STAIR_OFF] : [t.x + 1 + STAIR_OFF, t.y + 1 - u];
+    const pts = [];
+    for (let k = 0; k < h.unitFloor; k++) {
+      const flip = s.dir * (k % 2 ? -1 : 1) < 0;
+      const U = u => flip ? 1 - u : u;
+      const z0 = h.base + k * FL, z1 = z0 + FL;
+      if (k === 0) pts.push([...at(U(0.04)), s.ground != null ? s.ground : z0]);
+      pts.push([...at(U(2 / 3)), z1]);
+      pts.push([...at(U(0.9)), z1]);
+    }
+    const len = [0];
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      len.push(len[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1], (b[2] - a[2]) / FL));
+    }
+    h.stairPath = { pts, len, total: len[len.length - 1] };
+    return h.stairPath;
+  }
+  function stairPoint(sp, s) {
+    let i = 1;
+    while (i < sp.pts.length - 1 && sp.len[i] < s) i++;
+    const a = sp.pts[i - 1], b = sp.pts[i], f = (s - sp.len[i - 1]) / ((sp.len[i] - sp.len[i - 1]) || 1);
+    return { x: a[0] + (b[0] - a[0]) * f, y: a[1] + (b[1] - a[1]) * f, z: a[2] + (b[2] - a[2]) * f, dx: b[0] - a[0], dy: b[1] - a[1] };
+  }
+  // Escada cujo pé está perto do jogador
+  AF.nearStair = function (W, p) {
+    if (!W.stairHouses) W.stairHouses = W.houses.filter(h => h.stair);
+    for (const h of W.stairHouses) {
+      const b = stairPath(h).pts[0];
+      if (Math.hypot(p.x - b[0], p.y - b[1]) < 0.55 && Math.abs(p.z - b[2]) < 1.2) return h;
+    }
+    return null;
+  };
+
+  function updateOnStair(p, input, dt) {
+    const st = p.stair, sp = stairPath(st.house);
+    const cur = stairPoint(sp, st.s);
+    // "subir" = para cima na tela, ou no sentido do lance atual
+    const sdx = cur.dx - cur.dy;
+    let climb = -(input.gx + input.gy) + Math.sign(sdx) * (input.gx - input.gy) * 0.8;
+    if (st.auto) climb = st.auto;
+    const speed = 0.9 * (input.run ? CFG.RUN : 1);
+    let moved = 0;
+    if (Math.abs(climb) > 0.1) {
+      const ns = AF.clamp(st.s + Math.sign(climb) * speed * dt, 0, sp.total);
+      moved = Math.abs(ns - st.s); st.s = ns;
+    }
+    const q = stairPoint(sp, st.s);
+    p.x = q.x; p.y = q.y; p.z = q.z;
+    if (moved) setFacing(p, q.dx * Math.sign(climb), q.dy * Math.sign(climb));
+    p.moving = moved > 0.0005;
+    if (p.moving) p.phase += moved * 12;
+    p.onLanding = st.s >= sp.total - 0.01;
+    if (st.s <= 0 && climb < 0) {          // desceu até o chão
+      p.stair = null;
+      if (st.then) AF.goTo(st.W, p, st.then);
+    }
+  }
+
+  AF.enterStair = function (W, p, h) {
+    p.path = null; p.goal = null;
+    p.stair = { house: h, s: 0, W };
+  };
+  // Clique fora da escada: desce sozinho e depois segue para o destino
+  AF.leaveStairTo = function (p, tile) {
+    if (!p.stair) return false;
+    p.stair.auto = -1; p.stair.then = tile;
+    return true;
+  };
+
   AF.updatePlayer = function (W, p, input, dt, vehicles) {
+    if (p.stair) { updateOnStair(p, input, dt); return; }
+    p.onLanding = false;
     let gx = input.gx, gy = input.gy;
     const speed = CFG.SPEED * (input.run ? CFG.RUN : 1);
     let moved = 0;
+    const near = AF.nearStair(W, p);
+    if (near && input.interact) { AF.enterStair(W, p, near); return; }
     if (gx || gy) {
       p.path = null; p.goal = null;
       const n = Math.hypot(gx, gy); gx /= n; gy /= n;
       moved = moveEntity(W, p, gx * speed * dt, gy * speed * dt, vehicles);
       setFacing(p, gx, gy);
+      // andar de encontro à parede no pé da escada também sobe
+      if (near && moved < speed * dt * 0.3) {
+        const t = near.stair.tile;
+        const wallDir = near.stair.side === 'L' ? -gy : -gx;
+        if (wallDir > 0.5 && t) { p.bump = (p.bump || 0) + dt; if (p.bump > 0.15) { p.bump = 0; AF.enterStair(W, p, near); return; } }
+      } else p.bump = 0;
     } else if (p.path && p.path.length) {
       const t = p.path[0];
       const tx = t.x + 0.5, ty = t.y + 0.5;

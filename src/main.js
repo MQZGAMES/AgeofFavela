@@ -48,6 +48,7 @@
     if (e.code === 'KeyG') state.debug = !state.debug;
     if (e.code === 'KeyX') state.xray = !state.xray;
     if (e.code === 'KeyV') AF.view.cutaway = !AF.view.cutaway;
+    if (e.code === 'KeyE' || e.code === 'Enter') state.interact = true;
     if (e.code === 'KeyR') newWorld((Math.random() * 1e9) | 0);
     if (e.code === 'KeyH') document.getElementById('help').classList.toggle('hidden');
     if (e.code === 'Equal' || e.code === 'NumpadAdd') cam.zoom = Math.min(2.2, cam.zoom * 1.15);
@@ -66,7 +67,7 @@
     if (e.button !== 0) return;
     const [wx, wy] = toWorld(e.clientX, e.clientY);
     const t = W.pickTile(wx, wy);
-    if (t) AF.goTo(W, player, t);
+    if (t && !AF.leaveStairTo(player, t)) AF.goTo(W, player, t);
   });
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
@@ -99,9 +100,13 @@
         const sx = Math.round(Math.cos(a)), sy = Math.round(Math.sin(a));
         gx += sx + sy; gy += -sx + sy;
       }
-      if (b(0) || b(7)) run = true;
+      if (b(7)) run = true;
+      if (b(0) && !state.padA) state.interact = true;
+      state.padA = b(0);
     }
-    return { gx, gy, run };
+    const interact = !!state.interact;
+    state.interact = false;
+    return { gx, gy, run, interact };
   }
 
   // ------------------------------------------------------------ update
@@ -386,9 +391,15 @@
     if (state.hudT > 0) return;
     state.hudT = 0.2;
     const t = W.at(Math.floor(player.x), Math.floor(player.y));
-    const name = t ? AF.TYPE_NAME[t.type] : '—';
+    let name = t ? AF.TYPE_NAME[t.type] : '—';
+    let hint = '';
+    if (player.stair) {
+      name = 'Escada externa';
+      hint = player.onLanding ? 'porta do puxadinho (entrar: em breve) · <kbd>S</kbd> desce'
+        : '<kbd>W</kbd>/<kbd>↑</kbd> sobe · <kbd>S</kbd>/<kbd>↓</kbd> desce';
+    } else if (AF.nearStair(W, player)) hint = '<kbd>E</kbd> subir a escada';
     const alt = (player.z * 0.75).toFixed(1);
-    hud.innerHTML =
+    hud.innerHTML = (hint ? `<span class="hint">${hint}</span> · ` : '') +
       `<b>${name}</b> · altitude ${alt} m · tile (${Math.floor(player.x)}, ${Math.floor(player.y)})` +
       ` · oclusão ${(state.coverage * 100) | 0}% · ${state.fps.toFixed(0)} fps`;
     document.getElementById('btn-xray').classList.toggle('on', state.xray);

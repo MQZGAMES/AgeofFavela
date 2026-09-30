@@ -371,7 +371,7 @@
         if (!opts.length) { h.unitFloor = 0; continue; }
         const best = opts.filter(o => o.w === 4);
         const s = rng.pick(best.length ? best : opts);
-        h.stair = { tile: s.tile, side: s.side, dir: rng.chance(0.5) ? 1 : -1 };
+        h.stair = { tile: s.tile, side: s.side, dir: rng.chance(0.5) ? 1 : -1, ground: s.nb.level };
         s.nb.reserved = true;
       }
 
