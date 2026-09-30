@@ -1,15 +1,17 @@
 'use strict';
 (function (AF) {
   AF.CFG = {
-    N: 40,          // tamanho do mapa (N x N tiles)
+    N: 56,          // tamanho do mapa (N x N tiles; 1 tile = 3 m)
     HW: 48,         // meia largura do tile na tela (tile = 96 x 48, projeção 2:1)
     HH: 24,         // meia altura do tile na tela
     UZ: 14,         // pixels por unidade de altura (1 degrau)
     FLOOR: 4,       // unidades de altura por pavimento (56 px)
     STEP: 1.05,     // maior desnível que dá para subir/descer a pé
-    SPEED: 3.4,     // tiles por segundo
+    SPEED: 1.8,     // tiles por segundo (~5 m/s: trote de jogo)
     RUN: 1.65,      // multiplicador ao correr
-    RADIUS: 0.2,    // raio de colisão das entidades (em tiles)
+    RADIUS: 0.15,   // raio de colisão das entidades (em tiles; ~45 cm)
+    PERSON: 0.66,   // escala do desenho das pessoas (~1,70 m)
+    DOG: 0.75,
   };
 
   AF.T = { NONE: 0, AVENUE: 1, SIDEWALK: 2, ROAD: 3, BECO: 4, STAIR: 5, PLAZA: 6, HOUSE: 7, LOT: 8 };

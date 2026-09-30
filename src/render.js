@@ -152,7 +152,7 @@
     switch (t.type) {
       case T.AVENUE:
         if (y === N - 1 && x % 2 === 0) { ctx.fillStyle = '#e8c33a'; ctx.fillRect(0.15, -0.03, 0.5, 0.06); }
-        if (x === 14 || x === 15) { ctx.fillStyle = '#e4e4e4'; for (let k = 0; k < 4; k++) ctx.fillRect(0.06 + k * 0.25, 0.08, 0.12, 0.84); }
+        if (x === W.crossX || x === W.crossX + 1) { ctx.fillStyle = '#e4e4e4'; for (let k = 0; k < 4; k++) ctx.fillRect(0.06 + k * 0.25, 0.08, 0.12, 0.84); }
         break;
       case T.SIDEWALK: {
         // calçadão com ondas pretas e brancas
@@ -224,6 +224,7 @@
         ctx.fillRect(0, 0, FW, 3);
         if (k === 0) groundFloor(ctx, d, st, time);
         else windowDeco(ctx, d.win[k], st, d, k);
+        if (d.stair) extStair(ctx, d, k);
         ctx.fillStyle = side === 'L' ? 'rgba(30,20,60,0.05)' : 'rgba(30,20,60,0.3)';
         ctx.fillRect(0, 0, FW, FH);
         ctx.restore();
@@ -243,6 +244,44 @@
     if (ext(-1, 0)) poly(ctx, [P(x, y, zt), P(x + w, y, zt), P(x + w, y + 1, zt), P(x, y + 1, zt)], c);
     if (ext(0, 1)) poly(ctx, [P(x, y + 1 - w, zt), P(x + 1, y + 1 - w, zt), P(x + 1, y + 1, zt), P(x, y + 1, zt)], c);
     if (ext(1, 0)) poly(ctx, [P(x + 1 - w, y, zt), P(x + 1, y, zt), P(x + 1, y + 1, zt), P(x + 1 - w, y + 1, zt)], c);
+  }
+
+  // Escada externa do puxadinho: um lance por pavimento (em ziguezague) até a porta da outra unidade
+  function extStair(ctx, d, k) {
+    const s = d.stair;
+    if (k > s.floor) return;
+    const flip = (s.dir * (k % 2 ? -1 : 1)) < 0;
+    const doorFlip = (s.dir * ((s.floor - 1) % 2 ? -1 : 1)) < 0;
+    ctx.save();
+    if (k === s.floor) {
+      // porta da unidade de cima, no lado do patamar
+      if (doorFlip) { ctx.translate(FW, 0); ctx.scale(-1, 1); }
+      ctx.fillStyle = '#6b4a2e'; ctx.fillRect(34, 24, 12, 32);
+      ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(35, 26, 10, 12);
+      ctx.fillStyle = '#e8d9a8'; ctx.fillRect(43, 40, 1.5, 1.5);
+      ctx.restore();
+      return;
+    }
+    if (flip) { ctx.translate(FW, 0); ctx.scale(-1, 1); }
+    const n = 8, run = 32 / n, rise = FH / n;
+    // corpo da escada (degraus + parte de baixo)
+    ctx.beginPath();
+    ctx.moveTo(0, FH);
+    for (let i = 0; i < n; i++) { ctx.lineTo(i * run, FH - (i + 1) * rise); ctx.lineTo((i + 1) * run, FH - (i + 1) * rise); }
+    ctx.lineTo(48, 0); ctx.lineTo(48, 5); ctx.lineTo(32, 5); ctx.lineTo(7, FH);
+    ctx.closePath();
+    ctx.fillStyle = '#b9b3a8'; ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.beginPath(); ctx.moveTo(32, 5); ctx.lineTo(7, FH); ctx.lineTo(13, FH); ctx.lineTo(34, 9); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e4dfd4';
+    for (let i = 0; i < n; i++) ctx.fillRect(i * run, FH - (i + 1) * rise, run, 1.2);
+    // corrimão
+    ctx.strokeStyle = '#3d3d3d'; ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(1, FH - 11); ctx.lineTo(32, -11); ctx.lineTo(48, -11);
+    for (const u of [2, 16, 31, 47]) { const v = u <= 32 ? FH - (u / 32) * FH : 0; ctx.moveTo(u, v - 11); ctx.lineTo(u, v); }
+    ctx.stroke();
+    ctx.restore();
   }
 
   function windowDeco(ctx, w, st, d, k) {
@@ -661,6 +700,11 @@
 
   // ------------------------------------------------------------ personagens
   R.drawPerson = function (ctx, sx, sy, o) {
+    ctx.save(); ctx.translate(sx, sy); ctx.scale(CFG.PERSON, CFG.PERSON);
+    drawPersonRaw(ctx, 0, 0, o);
+    ctx.restore();
+  };
+  function drawPersonRaw(ctx, sx, sy, o) {
     const m = o.mono, c = col => m || col;
     const sw = o.moving ? Math.sin(o.phase) : 0;
     const fx = o.fx;
@@ -704,6 +748,11 @@
   };
 
   R.drawDog = function (ctx, sx, sy, o) {
+    ctx.save(); ctx.translate(sx, sy); ctx.scale(CFG.DOG, CFG.DOG);
+    drawDogRaw(ctx, 0, 0, o);
+    ctx.restore();
+  };
+  function drawDogRaw(ctx, sx, sy, o) {
     const fx = o.fx >= 0 ? 1 : -1, sw = o.moving ? Math.sin(o.phase) * 2.5 : 0;
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(sx, sy, 10, 4, 0, 0, TAU); ctx.fill();
     ctx.strokeStyle = o.col; ctx.lineWidth = 2.2;
@@ -727,6 +776,11 @@
 
   // sdx/sdy: direção na tela (normalizada)
   R.drawMoto = function (ctx, sx, sy, sdx, sdy, col, rider, time) {
+    ctx.save(); ctx.translate(sx, sy); ctx.scale(0.8, 0.8);
+    drawMotoRaw(ctx, 0, 0, sdx, sdy, col, rider, time);
+    ctx.restore();
+  };
+  function drawMotoRaw(ctx, sx, sy, sdx, sdy, col, rider, time) {
     const n = Math.hypot(sdx, sdy) || 1; sdx /= n; sdy /= n;
     const L = 11;
     const fx = sx + sdx * L, fy = sy + sdy * L, bx = sx - sdx * L, by = sy - sdy * L;
@@ -769,22 +823,35 @@
       const wheels = ax ? [[x0 + inset, y1], [x1 - inset, y1], [x1 - inset, y0]] : [[x1, y0 + inset], [x1, y1 - inset], [x0, y1 - inset]];
       ctx.fillStyle = '#151515';
       for (const [wx, wy] of wheels) { const q = P(wx, wy, z + wz * 0.5); ctx.beginPath(); ctx.ellipse(q[0], q[1], 5, 5.5, 0, 0, TAU); ctx.fill(); }
-      const top = v.kind === 'van' ? 3.1 : 1.5;
+      // alturas em unidades de 0,75 m: carro 1,5 m · van 2,3 m · ônibus 3,3 m
+      const top = v.kind === 'bus' ? 4.4 : v.kind === 'van' ? 3.1 : 1.2;
       box(ctx, x0, y0, x1, y1, z + 0.4, z + top, v.col);
+      const band = (za, zb, c1, c2) => {
+        poly(ctx, [P(x0, y1, zb), P(x1, y1, zb), P(x1, y1, za), P(x0, y1, za)], c1);
+        poly(ctx, [P(x1, y0, zb), P(x1, y1, zb), P(x1, y1, za), P(x1, y0, za)], c2);
+      };
       if (v.kind === 'car') {
         // cabine: um pouco para trás do centro
         const hdx = v.hx, hdy = v.hy;
         const cx = v.x - hdx * 0.1, cy = v.y - hdy * 0.1;
         const cex = ax ? hl * 0.5 : hw - 0.05, cey = ax ? hw - 0.05 : hl * 0.5;
-        box(ctx, cx - cex, cy - cey, cx + cex, cy + cey, z + top, z + top + 1.05, '#2a3a4a', 1.0, 1.05, 0.8);
-        box(ctx, cx - cex + 0.02, cy - cey + 0.02, cx + cex - 0.02, cy + cey - 0.02, z + top + 1.05, z + top + 1.15, v.col);
+        box(ctx, cx - cex, cy - cey, cx + cex, cy + cey, z + top, z + top + 0.85, '#2a3a4a', 1.0, 1.05, 0.8);
+        box(ctx, cx - cex + 0.02, cy - cey + 0.02, cx + cex - 0.02, cy + cey - 0.02, z + top + 0.85, z + top + 0.95, v.col);
+      } else if (v.kind === 'bus') {
+        band(2.4, 4.0, '#2c3e50', '#22313f');                      // janelas
+        ctx.strokeStyle = 'rgba(200,200,200,0.5)'; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        const n = 8;
+        for (let i = 1; i < n; i++) {
+          const f = i / n;
+          const a = ax ? P(x0 + (x1 - x0) * f, y1, z + 4.0) : P(x1, y0 + (y1 - y0) * f, z + 4.0);
+          ctx.moveTo(a[0], a[1]); ctx.lineTo(a[0], a[1] + 1.6 * UZ);
+        }
+        ctx.stroke();
+        band(1.2, 1.6, '#c0392b', '#962d22');                      // faixa
       } else {
-        // van: faixa de janelas + listra
-        const q1 = [P(x0, y1, z + 2.9), P(x1, y1, z + 2.9), P(x1, y1, z + 2.1), P(x0, y1, z + 2.1)];
-        poly(ctx, q1, '#34495e');
-        poly(ctx, [P(x1, y0, z + 2.9), P(x1, y1, z + 2.9), P(x1, y1, z + 2.1), P(x1, y0, z + 2.1)], '#2c3e50');
-        poly(ctx, [P(x0, y1, z + 1.4), P(x1, y1, z + 1.4), P(x1, y1, z + 1.1), P(x0, y1, z + 1.1)], '#1f6fb2');
-        poly(ctx, [P(x1, y0, z + 1.4), P(x1, y1, z + 1.4), P(x1, y1, z + 1.1), P(x1, y0, z + 1.1)], '#185a91');
+        band(2.1, 2.9, '#34495e', '#2c3e50');                      // van: janelas + listra
+        band(1.1, 1.4, '#1f6fb2', '#185a91');
       }
       // faróis
       const hx = v.hx, hy = v.hy;

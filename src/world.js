@@ -91,7 +91,10 @@
       }
 
       // Rua principal em ziguezague (2 tiles de largura)
-      const way = [[27, 36], [27, 29], [8, 29], [8, 20], [30, 20], [30, 11], [10, 11], [10, 4], [22, 4]];
+      // Layout desenhado para N=40 e escalado para o N atual
+      const K = N / 40, sc = v => Math.round(v * K);
+      const way = [[27, 36], [27, 29], [8, 29], [8, 20], [30, 20], [30, 11], [10, 11], [10, 4], [22, 4]]
+        .map(([x, y]) => [sc(x), y === 36 ? N - 4 : sc(y)]);
       const stamp = (x, y) => {
         for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
           const t = at(x + dx, y + dy);
@@ -108,14 +111,13 @@
       this.roadPath = way.map(([x, y]) => [x + 1, y + 1]);
 
       // Escadarias longas ligando trechos da rua
-      const stairs = [[18, 22, 28], [20, 13, 19], [14, 31, 36], [34, 22, 36], [16, 6, 10], [25, 13, 19], [4, 30, 36]];
-      for (const [x, y0, y1] of stairs) for (let y = y0; y <= y1; y++) {
+      const stairs = [[18, 22, 28], [20, 13, 19], [14, 31, 36], [34, 22, 36], [16, 6, 10], [25, 13, 19], [4, 30, 36]]
+        .map(([x, y0, y1]) => [sc(x), sc(y0), y1 === 36 ? N - 4 : sc(y1)]);
+      for (const [x, y0, y1] of stairs) for (let y = y0 - 1; y <= y1 + 1; y++) {
         const t = at(x, y);
         if (t && t.type === T.NONE) t.type = T.STAIR;
       }
-      for (const [x, y] of [[32, 21], [33, 21], [34, 21]]) {
-        const t = at(x, y); if (t && t.type === T.NONE) t.type = T.BECO;
-      }
+      this.crossX = stairs[2][0];
 
       // Becos: caminhantes aleatórios estreitos (evita abrir blocos 2x2 livres)
       const isPath = t => t && (t.type === T.ROAD || t.type === T.BECO || t.type === T.STAIR || t.type === T.PLAZA);
@@ -133,7 +135,7 @@
         return false;
       };
       const starts = tiles.filter(t => isPath(t) && t.y < N - 3);
-      for (let k = 0; k < 150; k++) {
+      for (let k = 0; k < 150 * K * K; k++) {
         const s = rng.pick(starts);
         let [dx, dy] = rng.pick(DIR4);
         let x = s.x, y = s.y;
@@ -149,7 +151,7 @@
 
       // Pracinhas 3x3 encostadas em caminhos
       this.plazas = [];
-      for (let k = 0; k < 400 && this.plazas.length < 3; k++) {
+      for (let k = 0; k < 400 && this.plazas.length < Math.round(3 * K * K); k++) {
         const s = rng.pick(starts);
         const ox = s.x + rng.int(-3, 1), oy = s.y + rng.int(-3, 1);
         let ok = oy > 2 && oy + 2 < N - 4, touches = false;
@@ -190,39 +192,55 @@
         if (!changed) break;
       }
 
-      // Casas (blocos 1x1 até 2x3) sobre fundações irregulares
+      // Casas: blocos de 2x2 a 3x3 tiles (1 tile = 3 m) sobre fundações irregulares
       const nz = (x, y) => AF.noise(x * 0.35, y * 0.35, seed + 3) * 2 - 1;
+      const groundLv = g => Math.max(0, Math.round(hill(g.x, g.y) + nz(g.x, g.y) * 1.6));
       this.houses = [];
-      const free = AF.shuffle(tiles.filter(t => t.type === T.NONE), rng);
-      for (const t of free) {
-        if (t.type !== T.NONE) continue;
-        if (rng.chance(0.06)) {
-          t.type = T.LOT; t.level = Math.max(0, Math.round(hill(t.x, t.y) + nz(t.x, t.y)));
-          continue;
+      const rect = (x, y, w, h) => {
+        const g = [];
+        for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) {
+          const q = at(x + dx, y + dy);
+          if (!q || q.type !== T.NONE) return null;
+          g.push(q);
         }
-        let w = rng.int(1, 2), h = rng.int(1, 3);
-        if (rng.chance(0.5)) [w, h] = [h, w];
-        let group = [];
-        for (let dy = 0; dy < h && group; dy++) for (let dx = 0; dx < w; dx++) {
-          const g = at(t.x + dx, t.y + dy);
-          if (!g || g.type !== T.NONE) { group = null; break; }
-          group.push(g);
-        }
-        if (!group) group = [t];
+        return g;
+      };
+      const addHouse = group => {
         const house = this.makeHouse(rng, this.houses.length);
         this.houses.push(house);
         let lv = 0;
-        for (const g of group) lv = Math.max(lv, Math.round(hill(g.x, g.y) + nz(g.x, g.y) * 1.6));
+        for (const g of group) lv = Math.max(lv, groundLv(g));
         for (const g of group) { g.type = T.HOUSE; g.house = house; g.level = lv; house.tiles.push(g); }
         house.base = lv;
+      };
+      for (const t of tiles) {           // varredura em ordem: empacota bem os blocos
+        if (t.type !== T.NONE) continue;
+        if (rng.chance(0.04)) { t.type = T.LOT; t.level = groundLv(t); continue; }
+        let w = rng.int(2, 3), h = rng.int(2, 3);
+        const group = rect(t.x, t.y, w, h) || rect(t.x, t.y, 2, 3) || rect(t.x, t.y, 3, 2) || rect(t.x, t.y, 2, 2);
+        if (group) addHouse(group);
+      }
+      // Sobras de 1 tile viram anexo da casa vizinha (ou quintal)
+      for (let pass = 0; pass < 3; pass++) {
+        for (const t of tiles) {
+          if (t.type !== T.NONE) continue;
+          const nb = DIR4.map(([dx, dy]) => at(t.x + dx, t.y + dy)).filter(n => n && n.type === T.HOUSE);
+          if (nb.length) {
+            const house = rng.pick(nb).house;
+            t.type = T.HOUSE; t.house = house; t.level = house.base; house.tiles.push(t);
+          } else if (pass === 2) { t.type = T.LOT; t.level = groundLv(t); }
+        }
       }
 
       // Conectividade: todo caminho precisa ser alcançável a partir do spawn
-      this.spawnTile = at(15, N - 3);
-      const r = this.reach();
+      this.spawnTile = at(this.crossX + 1, N - 3);
+      let r = this.reach();
       for (const t of tiles) {
         if (AF.WALK.has(t.type) && !r.seen[t.i]) { t.type = T.LOT; t.ceramic = false; }
       }
+
+      // Toda casa precisa de uma porta acessível: se não tiver, abre um beco até ela
+      this.ensureAccess(rng, hill);
 
       // Rampas da rua: altura por vértice = média dos tiles de rua que compartilham o vértice
       const cv = (cx, cy, fallback) => {
@@ -243,6 +261,78 @@
       this.computeTops();
     }
 
+    // Porta = face externa da casa voltada para um caminho alcançável com desnível <= 2 (degraus na soleira)
+    findDoor(house, seen) {
+      const sides = [['L', 0, 1], ['R', 1, 0], ['N', 0, -1], ['W', -1, 0]];   // L/R são as faces visíveis
+      let best = null;
+      for (const [side, dx, dy] of sides) {
+        for (const t of house.tiles) {
+          const n = this.at(t.x + dx, t.y + dy);
+          if (!n || n.house === house || !AF.WALK.has(n.type) || n.block || !seen[n.i]) continue;
+          const d = { tile: t, side, nb: n };
+          if (side === 'L' || side === 'R') return d;
+          if (!best) best = d;
+        }
+      }
+      return best;
+    }
+
+    ensureAccess(rng, hill) {
+      const N = this.N;
+      for (let pass = 0; pass < 4; pass++) {
+        const seen = this.reach().seen;
+        let changed = false;
+        for (const house of this.houses) {
+          if (!house.tiles.length) continue;
+          house.door = this.findDoor(house, seen);
+          if (house.door) continue;
+          // BFS atravessando lotes e outras casas até um caminho alcançável (máx. 14 tiles)
+          const prev = new Map(), q = [];
+          for (const t of house.tiles) for (const [dx, dy] of DIR4) {
+            const n = this.at(t.x + dx, t.y + dy);
+            if (n && n.house !== house && !prev.has(n.i) && n.y < N - 3) { prev.set(n.i, null); q.push([n, 1]); }
+          }
+          let goal = null;
+          for (let qi = 0; qi < q.length && !goal; qi++) {
+            const [t, d] = q[qi];
+            if (AF.WALK.has(t.type) && seen[t.i] && !t.block) { goal = t; break; }
+            if (d >= 14 || AF.WALK.has(t.type)) continue;
+            for (const [dx, dy] of DIR4) {
+              const n = this.at(t.x + dx, t.y + dy);
+              if (!n || n.house === house || prev.has(n.i) || n.y >= N - 3) continue;
+              prev.set(n.i, t); q.push([n, d + 1]);
+            }
+          }
+          if (goal) {
+            // escava do caminho até a casa, com degraus de no máximo 1
+            let lv = goal.level;
+            for (let t = prev.get(goal.i); t; t = prev.get(t.i)) {
+              if (t.house) { t.house.tiles = t.house.tiles.filter(g => g !== t); t.house = null; }
+              t.type = T.BECO; t.props = [];
+              lv = Math.max(lv - 1, Math.min(lv + 1, Math.round(hill(t.x, t.y))));
+              t.level = lv;
+            }
+            changed = true;
+          } else {
+            for (const t of house.tiles) { t.type = T.LOT; t.house = null; }   // sem acesso possível: vira terreno
+            house.tiles = [];
+          }
+        }
+        if (!changed) break;
+      }
+      const seen = this.reach().seen;
+      for (const h of this.houses) {
+        if (!h.tiles.length) continue;
+        h.door = this.findDoor(h, seen);
+        if (!h.door) { for (const t of h.tiles) { t.type = T.LOT; t.house = null; } h.tiles = []; continue; }
+        // fundação acompanha a porta: no máximo 1 degrau de soleira
+        const nl = Math.round(h.door.nb.level);
+        h.base = nl + AF.clamp(h.base - nl, -1, 1);
+        for (const t of h.tiles) t.level = h.base;
+      }
+      this.houses = this.houses.filter(h => h.tiles.length);
+    }
+
     makeHouse(rng, id) {
       const r = rng();
       const floors = r < 0.16 ? 1 : r < 0.48 ? 2 : r < 0.82 ? 3 : 4;
@@ -257,12 +347,33 @@
       }
       const topBrick = styles[floors - 1].brick;
       const roof = topBrick && rng.chance(0.55) ? 'obra' : rng.chance(0.14) ? 'telha' : 'laje';
-      return { id, floors, styles, roof, tiles: [], base: 0, shop: null };
+      // Andar de cima de outra família ("puxadinho"), com acesso próprio por escada externa
+      const unitFloor = floors >= 2 && rng.chance(0.5) ? rng.int(1, floors - 1) : 0;
+      return { id, floors, styles, roof, tiles: [], base: 0, shop: null, unitFloor, stair: null, door: null };
     }
 
     decorate(rng) {
       const at = (x, y) => this.at(x, y);
       const tiles = this.tiles;
+
+      // Escada externa do puxadinho: numa face visível voltada para caminho, de preferência longe da porta
+      const sideNb = (t, side) => side === 'L' ? at(t.x, t.y + 1) : at(t.x + 1, t.y);
+      for (const h of this.houses) {
+        if (h.door) h.door.nb.reserved = true;
+        if (!h.unitFloor) continue;
+        const opts = [];
+        for (const t of h.tiles) for (const side of ['L', 'R']) {
+          const nb = sideNb(t, side);
+          if (!nb || nb.house === h || !AF.WALK.has(nb.type) || nb.type === T.AVENUE || Math.abs(nb.level - h.base) > 1.5) continue;
+          const isDoor = h.door && h.door.tile === t && h.door.side === side;
+          opts.push({ tile: t, side, nb, w: isDoor ? 1 : 4 });
+        }
+        if (!opts.length) { h.unitFloor = 0; continue; }
+        const best = opts.filter(o => o.w === 4);
+        const s = rng.pick(best.length ? best : opts);
+        h.stair = { tile: s.tile, side: s.side, dir: rng.chance(0.5) ? 1 : -1 };
+        s.nb.reserved = true;
+      }
 
       // Fachadas, comércio, grafites e itens de laje
       for (const t of tiles) {
@@ -273,13 +384,15 @@
           const nb = side === 'L' ? at(t.x, t.y + 1) : at(t.x + 1, t.y);
           if (nb && nb.house === h) { t.faces[side] = null; continue; }
           const open = !!nb && AF.WALK.has(nb.type) && Math.abs(nb.level - t.level) <= 1.5;
-          const d = { open, shop: null, door: false, graf: null, win: [], ac: rng.chance(0.22), doorC: rng.pick(DOORS) };
-          if (open) {
-            if (!h.shop && nb.type !== T.AVENUE && rng.chance(0.1)) {
+          const d = { open, shop: null, door: false, graf: null, win: [], ac: rng.chance(0.22), doorC: rng.pick(DOORS), stair: null };
+          const mainDoor = h.door && h.door.tile === t && h.door.side === side;
+          if (h.stair && h.stair.tile === t && h.stair.side === side) d.stair = { floor: h.unitFloor, dir: h.stair.dir };
+          if (open || mainDoor) {
+            if (!h.shop && !d.stair && nb.type !== T.AVENUE && rng.chance(0.12)) {
               const sh = rng.pick(SHOPS);
               d.shop = { kind: sh.kind, name: rng.pick(sh.names) };
               h.shop = d.shop;
-            } else d.door = rng.chance(0.55);
+            } else d.door = mainDoor || (!d.stair && rng.chance(0.3));
           }
           if (!d.shop && rng.chance(open ? 0.32 : 0.14)) {
             d.graf = { text: rng.pick(TAGS), color: rng.pick(GRAF), rot: rng.range(-0.18, 0.08), u: rng.range(3, 12), v: rng.range(40, 50) };
@@ -303,6 +416,7 @@
 
       // Props que bloqueiam passagem — nunca desconectam o mapa
       const tryBlock = (t, prop) => {
+        if (t.reserved) return false;           // frente de porta/escada fica sempre livre
         t.block = true; t.props.push(prop);
         const c = this.reach().count;
         if (c < this.walkCount - 1) { t.block = false; t.props.pop(); return false; }

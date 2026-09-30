@@ -132,8 +132,8 @@
   function computeOcclusion(pp, psum, dt) {
     const N = W.N;
     const samples = [], halo = [];
-    for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++) samples.push([pp[0] - 6 + i * 6, pp[1] - 9 - j * 10.5]);
-    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) halo.push([pp[0] - 34 + i * 17, pp[1] - 4 - j * 15]);
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++) samples.push([pp[0] - 4 + i * 4, pp[1] - 6 - j * 7]);
+    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) halo.push([pp[0] - 28 + i * 14, pp[1] - 4 - j * 11]);
     const covered = new Uint8Array(samples.length);
     const fadeList = [];
     for (let s = psum + 1; s <= 2 * N - 2; s++) {
@@ -251,7 +251,7 @@
       R.drawPerson(ctx, pp[0], pp[1], Object.assign({ mono: '#ffe14d', fx: player.fx, back: player.back, phase: player.phase, moving: player.moving }, player.look));
       ctx.globalAlpha = 1;
       ctx.strokeStyle = 'rgba(255,225,77,0.9)'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.ellipse(pp[0], pp[1], 12, 6, 0, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(pp[0], pp[1], 9, 4.5, 0, 0, TAU); ctx.stroke();
     }
 
     if (state.debug) drawDebug(view);
@@ -336,9 +336,10 @@
   }
 
   // ------------------------------------------------------------ minimapa
-  const MS = 2.6;
+  let MS = 2;
   function buildMinimap() {
     const N = W.N;
+    MS = (mini.width / 2 - 6) / N;
     miniBase = document.createElement('canvas');
     miniBase.width = mini.width; miniBase.height = mini.height;
     const g = miniBase.getContext('2d');

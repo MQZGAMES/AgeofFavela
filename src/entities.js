@@ -107,7 +107,7 @@
       const t = rng.pick(spots);
       list.push({
         kind: 'npc', x: t.x + 0.5, y: t.y + 0.5, z: t.level, fx: 1, back: false, phase: 0, moving: false,
-        tx: t.x + 0.5, ty: t.y + 0.5, wait: rng.range(0, 3), speed: rng.range(1.1, 1.7), rng,
+        tx: t.x + 0.5, ty: t.y + 0.5, wait: rng.range(0, 3), speed: rng.range(0.55, 0.8), rng,
         look: { shirt: rng.pick(SHIRTS), pants: rng.pick(PANTS), skin: rng.pick(SKINS), hair: rng.pick(HAIR), cap: rng.chance(0.3) ? rng.pick(SHIRTS) : null },
       });
     }
@@ -115,7 +115,7 @@
       const t = rng.pick(spots), c = rng.pick(DOGS);
       list.push({
         kind: 'dog', x: t.x + 0.5, y: t.y + 0.5, z: t.level, fx: 1, back: false, phase: 0, moving: false,
-        tx: t.x + 0.5, ty: t.y + 0.5, wait: rng.range(0, 3), speed: rng.range(1.6, 2.4), rng, col: c[0], spot: c[1],
+        tx: t.x + 0.5, ty: t.y + 0.5, wait: rng.range(0, 3), speed: rng.range(0.8, 1.3), rng, col: c[0], spot: c[1],
       });
     }
     return list;
@@ -171,29 +171,33 @@
   AF.spawnVehicles = function (W, rng) {
     const N = W.N, list = [];
     const track = buildTrack(W.roadPath);
+    // Dimensões reais / 3 m por tile: moto 2,0x0,8 m · carro 4,2x1,8 m · van 4,5x1,9 m · ônibus 12x2,5 m
     const hill = [
-      { kind: 'moto', len: 0.8, wid: 0.35, speed: 3.2 },
-      { kind: 'moto', len: 0.8, wid: 0.35, speed: 2.9 },
-      { kind: 'car', len: 1.3, wid: 0.62, speed: 2.2 },
-      { kind: 'van', len: 1.45, wid: 0.66, speed: 1.9 },
+      { kind: 'moto', len: 0.7, wid: 0.3, speed: 3.2 },
+      { kind: 'moto', len: 0.7, wid: 0.3, speed: 2.9 },
+      { kind: 'car', len: 1.4, wid: 0.6, speed: 2.2 },
+      { kind: 'van', len: 1.5, wid: 0.64, speed: 1.9 },
+      { kind: 'moto', len: 0.7, wid: 0.3, speed: 3.0 },
+      { kind: 'car', len: 1.4, wid: 0.6, speed: 2.4 },
     ];
     hill.forEach((h, i) => {
       list.push(Object.assign({
-        track, s: track.total * (0.15 + i * 0.22), dir: i % 2 ? -1 : 1, x: 0, y: 0, z: 0, hx: 1, hy: 0,
+        track, s: track.total * (0.08 + i * 0.15), dir: i % 2 ? -1 : 1, x: 0, y: 0, z: 0, hx: 1, hy: 0,
         col: h.kind === 'van' ? '#ecf0f1' : rng.pick(AF.VEH_COLORS), helmet: rng.pick(['#e74c3c', '#f1c40f', '#111', '#2980b9']),
         honk: -2, wait: 0,
       }, h));
     });
-    for (let i = 0; i < 5; i++) {
-      const lane = i % 2;
-      const kind = i === 4 ? 'van' : i === 3 ? 'moto' : 'car';
+    const DIM = { moto: [0.7, 0.3, 3.8], car: [1.4, 0.6, 3], van: [1.5, 0.64, 2.8], bus: [4, 0.85, 2.4] };
+    const avenue = ['bus', 'car', 'car', 'moto', 'van', 'bus', 'car', 'moto'];
+    avenue.forEach((kind, i) => {
+      const lane = i % 2, [len, wid, speed] = DIM[kind];
       list.push({
-        kind, len: kind === 'moto' ? 0.8 : kind === 'van' ? 1.45 : 1.3, wid: kind === 'moto' ? 0.35 : 0.62,
-        speed: kind === 'moto' ? 3.8 : 3, avenue: true, lane,
-        x: rng.range(0, N), y: N - 2 + lane + 0.5, z: 0, hx: lane ? -1 : 1, hy: 0, dir: 1,
-        col: kind === 'van' ? '#f5f5f5' : rng.pick(AF.VEH_COLORS), helmet: '#111', honk: -2,
+        kind, len, wid, speed, avenue: true, lane,
+        x: (i + 0.5) * (N + 6) / avenue.length - 3, y: N - 2 + lane + 0.5, z: 0, hx: lane ? -1 : 1, hy: 0, dir: 1,
+        col: kind === 'van' ? '#f5f5f5' : kind === 'bus' ? rng.pick(['#f2c230', '#2e86c1', '#e2e2e2']) : rng.pick(AF.VEH_COLORS),
+        helmet: '#111', honk: -2,
       });
-    }
+    });
     list.forEach(v => placeOnTrack(W, v));
     return list;
   };
